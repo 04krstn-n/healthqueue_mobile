@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
-import '../models/queue_models.dart';
 import '../services/api_service.dart';
 import '../state/app_state.dart';
 
@@ -133,7 +132,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(children: const [
+        title: const Row(children: [
           Icon(Icons.access_time, color: Color(0xFFD97706), size: 24),
           SizedBox(width: 8),
           Text('Getting Closer!',
@@ -172,7 +171,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: const Color(0xFFFFFBEB),
-        title: Row(children: const [
+        title: const Row(children: [
           Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 26),
           SizedBox(width: 8),
           Text("You're Next!",
@@ -231,7 +230,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: const Color(0xFFF0FDF4),
-        title: Row(children: const [
+        title: const Row(children: [
           Icon(Icons.campaign_outlined, color: Color(0xFF16A34A), size: 28),
           SizedBox(width: 8),
           Text('You Are Being Called!',
@@ -247,7 +246,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-                color: const Color(0xFF16A34A).withOpacity(.1),
+                color: const Color(0xFF16A34A).withValues(alpha: .1),
                 borderRadius: BorderRadius.circular(10)),
             child: const Text(
               'Your slot may be forfeited if you do not arrive within the grace period.',
@@ -350,8 +349,10 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
         await _fetch();
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
     }
   }
 
@@ -450,7 +451,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: Colors.white, borderRadius: BorderRadius.circular(20),
-                    boxShadow: [BoxShadow(blurRadius: 16, color: Colors.black.withOpacity(.06), offset: const Offset(0, 4))],
+                    boxShadow: [BoxShadow(blurRadius: 16, color: Colors.black.withValues(alpha: .06), offset: const Offset(0, 4))],
                   ),
                   child: Column(children: [
                     Text(entry?['queueNumber'] ?? '—',
@@ -589,7 +590,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       padding: const EdgeInsets.all(32),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Container(width: 80, height: 80,
-          decoration: BoxDecoration(color: const Color(0xFFEFF6FF), shape: BoxShape.circle),
+          decoration: const BoxDecoration(color: Color(0xFFEFF6FF), shape: BoxShape.circle),
           child: const Icon(Icons.queue_outlined, size: 38, color: AppColors.primary)),
         const SizedBox(height: 20),
         const Text("You're not in any queue", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
@@ -631,8 +632,8 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     final c = map[s] ?? [Colors.grey.shade100, Colors.grey.shade600];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: c[0] as Color, borderRadius: BorderRadius.circular(99)),
-      child: Text(s.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c[1] as Color)),
+      decoration: BoxDecoration(color: c[0], borderRadius: BorderRadius.circular(99)),
+      child: Text(s.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c[1])),
     );
   }
 

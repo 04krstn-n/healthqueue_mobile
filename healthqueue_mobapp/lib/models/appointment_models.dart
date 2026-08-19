@@ -1,5 +1,6 @@
 /// Appointment data models — synced with hq-server enums
 /// Server statuses: pending | confirmed | arrived | serving | completed | noShow | cancelled | rescheduled
+library;
 
 enum AppointmentStatus {
   pending,

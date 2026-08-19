@@ -191,7 +191,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         quickReplies: ['Find clinic near me'],
       );
       setState(() => _escalated = true);
-      ApiService.escalateChatbot(note: msg).catchError((_) {});
+      ApiService.escalateChatbot(note: msg).catchError((_) => false);
       return true;
     }
 
@@ -333,7 +333,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(.2),
+                        color: Colors.orange.withValues(alpha: .2),
                         borderRadius: BorderRadius.circular(99)),
                     child: const Text('Staff notified',
                         style: TextStyle(
@@ -375,7 +375,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                                         borderRadius: BorderRadius.circular(99),
                                         border: Border.all(
                                             color: AppColors.primary
-                                                .withOpacity(.4)),
+                                                .withValues(alpha: .4)),
                                       ),
                                       child: Text(q,
                                           style: const TextStyle(
@@ -411,7 +411,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                                 color: const Color(0xFFF0FDF4),
                                 borderRadius: BorderRadius.circular(99),
                                 border: Border.all(
-                                    color: AppColors.primary.withOpacity(.3)),
+                                    color: AppColors.primary.withValues(alpha: .3)),
                               ),
                               child: Text(q,
                                   style: const TextStyle(
@@ -432,7 +432,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               boxShadow: [
                 BoxShadow(
                     blurRadius: 10,
-                    color: Colors.black.withOpacity(.06),
+                    color: Colors.black.withValues(alpha: .06),
                     offset: const Offset(0, -2))
               ],
             ),
@@ -560,7 +560,7 @@ class _MessageBubble extends StatelessWidget {
                     : Border.all(color: Colors.grey.shade100),
                 boxShadow: [BoxShadow(
                     blurRadius: 4,
-                    color: Colors.black.withOpacity(.05),
+                    color: Colors.black.withValues(alpha: .05),
                     offset: const Offset(0, 1))],
               ),
               child: Text(msg.text,

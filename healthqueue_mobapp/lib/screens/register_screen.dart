@@ -16,7 +16,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // Global key to manage the Form state and trigger layout validation messages
   final _formKey = GlobalKey<FormState>();
 
-  bool _isEmailMode    = true;
+  final bool _isEmailMode    = true;
   bool _showPassword   = false;
   bool _showConfirm    = false;
   bool _agreed         = false;
@@ -387,7 +387,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         boxShadow: [
                           BoxShadow(
                             blurRadius: 20,
-                            color: Colors.black.withOpacity(.1),
+                            color: Colors.black.withValues(alpha: .1),
                           ),
                         ],
                       ),
@@ -629,7 +629,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: AppColors.border),
+        borderSide: const BorderSide(color: AppColors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),

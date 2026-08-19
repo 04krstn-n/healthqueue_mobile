@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../core/routes/app_routes.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../models/appointment_models.dart' as apt;
@@ -115,8 +114,9 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       final raw = await ApiService.getAvailableSlots(clinicId: _clinic!.id, date: dateStr);
       final slots = <String>[];
       for (final s in raw) {
-        if (s is String && s.isNotEmpty) slots.add(s);
-        else if (s is Map) {
+        if (s is String && s.isNotEmpty) {
+          slots.add(s);
+        } else if (s is Map) {
           final t = s['time']?.toString() ?? s['label']?.toString() ?? '';
           if (t.isNotEmpty) slots.add(t);
         }
@@ -162,7 +162,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
         'patientType':     _patientType.label,
         if (_notesCtrl.text.trim().isNotEmpty) 'notes': _notesCtrl.text.trim(),
       });
-      final m    = res is Map<String, dynamic> ? res : <String, dynamic>{};
+      final m    = res;
       final appt = apt.Appointment(
         id:          m['_id']?.toString() ?? m['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
         clinicName:  _clinic!.name,
@@ -620,7 +620,7 @@ class _StepPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: BoxDecoration(color: AppColors.primary.withOpacity(.1), borderRadius: BorderRadius.circular(99)),
+    decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: .1), borderRadius: BorderRadius.circular(99)),
     child: Text('Step $current of $total', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primary)),
   );
 }

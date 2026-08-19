@@ -106,7 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [BoxShadow(
                           blurRadius: 20,
-                          color: Colors.black.withOpacity(.1))],
+                          color: Colors.black.withValues(alpha: .1))],
                     ),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -252,7 +252,7 @@ class _LoginScreenState extends State<LoginScreen> {
             borderSide: BorderSide.none),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppColors.border)),
+            borderSide: const BorderSide(color: AppColors.border)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),

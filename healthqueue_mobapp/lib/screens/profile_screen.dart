@@ -158,7 +158,7 @@ Widget build(BuildContext context) {
                 children: [
                   CircleAvatar(
                     radius: 34,
-                    backgroundColor: Colors.white.withOpacity(0.18),
+                    backgroundColor: Colors.white.withValues(alpha: 0.18),
                     child: Text(
                       _initials(user.fullName),
                       style: const TextStyle(
@@ -188,7 +188,7 @@ Widget build(BuildContext context) {
                         ? user.patientType
                         : 'Regular Patient',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(.85),
+                      color: Colors.white.withValues(alpha: .85),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -686,7 +686,7 @@ class _ToggleRow extends StatelessWidget {
             fontSize: 13, color: AppColors.textDark)),
         Text(subtitle, style: const TextStyle(fontSize: 11, color: AppColors.textMuted)),
       ])),
-      Switch(value: value, onChanged: onChanged, activeColor: AppColors.primary),
+      Switch(value: value, onChanged: onChanged, activeThumbColor: AppColors.primary),
     ]),
   );
 }
@@ -701,7 +701,7 @@ class _SectionCard extends StatelessWidget {
     decoration: BoxDecoration(
       color: Colors.white, borderRadius: BorderRadius.circular(14),
       border: Border.all(color: AppColors.border),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8)],
     ),
     child: Column(children: [
       Padding(
@@ -762,7 +762,7 @@ class _ActionRow extends StatelessWidget {
           Expanded(child: Text(label,
               style: TextStyle(fontWeight: FontWeight.w700,
                   fontSize: 13, color: c))),
-          Icon(Icons.chevron_right_rounded, color: c.withOpacity(0.5), size: 18),
+          Icon(Icons.chevron_right_rounded, color: c.withValues(alpha: 0.5), size: 18),
         ]),
       ),
     );
@@ -787,7 +787,7 @@ class _MiniInfoCard extends StatelessWidget {
         horizontal: 16,
       ),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.15),
+        color: Colors.white.withValues(alpha: .15),
         borderRadius:
             BorderRadius.circular(16),
       ),
@@ -807,8 +807,8 @@ class _MiniInfoCard extends StatelessWidget {
             label,
             style: TextStyle(
               color:
-                  Colors.white.withOpacity(
-                .8,
+                  Colors.white.withValues(
+                alpha: .8,
               ),
               fontSize: 12,
             ),

@@ -51,7 +51,7 @@ class Clinic {
       for (final s in j['services'] as List) {
         if (s is Map) {
           // Cast safely: Map can be Map<dynamic,dynamic> from JSON decode
-          svcs.add(Map<String, dynamic>.from(s as Map));
+          svcs.add(Map<String, dynamic>.from(s));
         } else if (s is String && s.isNotEmpty) {
           svcs.add({'name': s, 'isAvailable': true});
         }

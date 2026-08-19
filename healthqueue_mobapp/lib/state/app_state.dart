@@ -93,7 +93,9 @@ class AppState extends ChangeNotifier {
     final now = DateTime.now();
     int age = now.year - dob.year;
     if (now.month < dob.month ||
-        (now.month == dob.month && now.day < dob.day)) age--;
+        (now.month == dob.month && now.day < dob.day)) {
+      age--;
+    }
     return age > 0 ? age.toString() : '';
   }
 
@@ -156,20 +158,23 @@ class AppState extends ChangeNotifier {
 
         // Server populates clinic as 'clinic' (not 'clinicId') with { _id, name, address }
         String clinicName = '';
-        if      (m['clinic']   is Map)    clinicName = (m['clinic'] as Map)['name']?.toString() ?? '';
-        else if (m['clinicId'] is Map)    clinicName = (m['clinicId'] as Map)['name']?.toString() ?? '';
+        if      (m['clinic']   is Map) {
+          clinicName = (m['clinic'] as Map)['name']?.toString() ?? '';
+        } else if (m['clinicId'] is Map)    clinicName = (m['clinicId'] as Map)['name']?.toString() ?? '';
         else if (m['clinicName'] is String) clinicName = m['clinicName'] as String;
 
         // Service name — server stores as 'serviceName' string
         String serviceName = '';
-        if      (m['serviceName'] is String) serviceName = m['serviceName'] as String;
-        else if (m['serviceId']   is Map)    serviceName = (m['serviceId'] as Map)['name']?.toString() ?? '';
+        if      (m['serviceName'] is String) {
+          serviceName = m['serviceName'] as String;
+        } else if (m['serviceId']   is Map)    serviceName = (m['serviceId'] as Map)['name']?.toString() ?? '';
         else if (m['department']  is String) serviceName = m['department']  as String;
 
         // Doctor / staff
         String doctorName = '';
-        if      (m['staff']   is Map) doctorName = (m['staff']   as Map)['fullName']?.toString() ?? '';
-        else if (m['staffId'] is Map) doctorName = (m['staffId'] as Map)['fullName']?.toString() ?? '';
+        if      (m['staff']   is Map) {
+          doctorName = (m['staff']   as Map)['fullName']?.toString() ?? '';
+        } else if (m['staffId'] is Map) doctorName = (m['staffId'] as Map)['fullName']?.toString() ?? '';
         else if (m['doctor']  is String) doctorName = m['doctor'] as String;
 
         return Appointment(
@@ -209,7 +214,7 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
     if (status == AppointmentStatus.cancelled) {
-      ApiService.cancelAppointment(id).catchError((_) {});
+      ApiService.cancelAppointment(id).catchError((_) => false);
     }
     fetchAppointments();
   }
@@ -242,8 +247,9 @@ class AppState extends ChangeNotifier {
       } else {
         final e = data['entry'] as Map<String, dynamic>;
         String clinicName = '';
-        if (e['clinic'] is Map)             clinicName = e['clinic']['name'] ?? '';
-        else if (e['clinicName'] is String) clinicName = e['clinicName'] ?? '';
+        if (e['clinic'] is Map) {
+          clinicName = e['clinic']['name'] ?? '';
+        } else if (e['clinicName'] is String) clinicName = e['clinicName'] ?? '';
 
         final wait = (data['estimatedWaitTime'] ?? e['estimatedWaitMinutes'] ?? 0) as int;
         final pos  = (data['peopleAhead'] ?? data['position'] ?? 0) as int;

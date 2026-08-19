@@ -49,12 +49,14 @@ class _AiInsightsScreenState extends State<AiInsightsScreen>
       try {
         if (await Geolocator.isLocationServiceEnabled()) {
           var perm = await Geolocator.checkPermission();
-          if (perm == LocationPermission.denied)
+          if (perm == LocationPermission.denied) {
             perm = await Geolocator.requestPermission();
-          if (perm != LocationPermission.deniedForever)
+          }
+          if (perm != LocationPermission.deniedForever) {
             pos = await Geolocator.getCurrentPosition(
                 desiredAccuracy: LocationAccuracy.medium)
                 .timeout(const Duration(seconds: 6));
+          }
         }
       } catch (_) {}
 
@@ -166,8 +168,6 @@ class _AiInsightsScreenState extends State<AiInsightsScreen>
   );
 
   Widget _buildBody() {
-    final recommendation = _peakData['recommendation'] as String?
-        ?? 'Morning hours (8–10 AM) tend to have shorter wait times.';
     final avgWait  = _peakData['avgWaitAll']  as int? ?? 18;
     final peakLoad = _peakData['peakLoad']    as int? ?? 35;
     final peakLbl  = _peakData['peakLabel']   as String? ?? '10 AM';
@@ -176,8 +176,8 @@ class _AiInsightsScreenState extends State<AiInsightsScreen>
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
         // ── Subtitle ────────────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text('Plan your visit with real-time analytics',
               style: TextStyle(color: Colors.black45, fontSize: 12.5)),
         ),
@@ -310,7 +310,7 @@ class _RecommendationBanner extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF2563EB).withOpacity(.35)),
+            border: Border.all(color: const Color(0xFF2563EB).withValues(alpha: .35)),
           ),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Icon(Icons.access_time_rounded,
@@ -376,7 +376,7 @@ class _TabBar extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
           boxShadow: [BoxShadow(blurRadius: 4,
-              color: Colors.black.withOpacity(.08), offset: const Offset(0,1))],
+              color: Colors.black.withValues(alpha: .08), offset: const Offset(0,1))],
         ),
         labelColor: Colors.black87,
         unselectedLabelColor: Colors.black38,
@@ -410,7 +410,7 @@ class _StatCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withOpacity(.07)),
+        border: Border.all(color: Colors.black.withValues(alpha: .07)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -447,10 +447,10 @@ class _HourlyChart extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.bar_chart_rounded, size: 16, color: AppColors.primary),
-          const SizedBox(width: 6),
-          const Text('Patient Volume by Hour',
+        const Row(children: [
+          Icon(Icons.bar_chart_rounded, size: 16, color: AppColors.primary),
+          SizedBox(width: 6),
+          Text('Patient Volume by Hour',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
         ]),
         const SizedBox(height: 2),
@@ -542,7 +542,7 @@ class _HourRow extends StatelessWidget {
         const SizedBox(height: 4),
         LayoutBuilder(builder: (context, constraints) => Stack(children: [
           Container(height: 8,
-              decoration: BoxDecoration(color: Colors.black.withOpacity(.06),
+              decoration: BoxDecoration(color: Colors.black.withValues(alpha: .06),
                   borderRadius: BorderRadius.circular(4))),
           Container(
             height: 8,
@@ -574,11 +574,11 @@ class _WeeklyChart extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.calendar_today_outlined,
+        const Row(children: [
+          Icon(Icons.calendar_today_outlined,
               size: 15, color: AppColors.primary),
-          const SizedBox(width: 6),
-          const Text('Weekly Traffic Pattern',
+          SizedBox(width: 6),
+          Text('Weekly Traffic Pattern',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
         ]),
         const SizedBox(height: 2),
@@ -653,11 +653,11 @@ class _ServicesView extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.medical_services_outlined,
+        const Row(children: [
+          Icon(Icons.medical_services_outlined,
               size: 15, color: AppColors.primary),
-          const SizedBox(width: 6),
-          const Text('Service Load',
+          SizedBox(width: 6),
+          Text('Service Load',
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
         ]),
         const SizedBox(height: 2),
@@ -680,7 +680,7 @@ class _ServicesView extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black.withOpacity(.07)),
+                border: Border.all(color: Colors.black.withValues(alpha: .07)),
               ),
               child: Row(children: [
                 Expanded(child: Column(
@@ -711,7 +711,7 @@ class _ServicesView extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(.12),
+                    color: color.withValues(alpha: .12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(load,
@@ -734,7 +734,7 @@ class _EmptyServices extends StatelessWidget {
     decoration: BoxDecoration(
       color: const Color(0xFFF8FAFC),
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.black.withOpacity(.07)),
+      border: Border.all(color: Colors.black.withValues(alpha: .07)),
     ),
     child: const Column(children: [
       Icon(Icons.medical_services_outlined, size: 36, color: Colors.black26),

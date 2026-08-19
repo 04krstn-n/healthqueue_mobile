@@ -85,10 +85,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _loadNotifications() async {
     try {
       final list = await ApiService.getNotifications();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _notifications = list;
         _unreadCount   = list.where((n) => n['isRead'] == false).length;
       });
+      }
     } catch (_) {}
   }
 
@@ -104,8 +106,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) return;
       var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied)
+      if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
+      }
       if (perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high)
@@ -193,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 margin: const EdgeInsets.only(top: 56, right: 8, left: 60),
                 decoration: BoxDecoration(
                   color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(blurRadius: 20, color: Colors.black.withOpacity(.15))],
+                  boxShadow: [BoxShadow(blurRadius: 20, color: Colors.black.withValues(alpha: .15))],
                 ),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Padding(
@@ -233,11 +236,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 dense: true,
                                 tileColor: read
                                     ? null
-                                    : AppColors.primary.withOpacity(.04),
+                                    : AppColors.primary.withValues(alpha: .04),
                                 leading: CircleAvatar(
                                   radius: 16,
                                   backgroundColor:
-                                      AppColors.primary.withOpacity(.12),
+                                      AppColors.primary.withValues(alpha: .12),
                                   child: Icon(_notifIcon(n['type'] as String?),
                                       size: 16, color: AppColors.primary),
                                 ),
@@ -503,7 +506,7 @@ class _ActiveQueueCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             blurRadius: 12,
-            color: (isCalled ? Colors.green : Colors.blue).withOpacity(.25),
+            color: (isCalled ? Colors.green : Colors.blue).withValues(alpha: .25),
             offset: const Offset(0, 4),
           )
         ],
@@ -525,7 +528,7 @@ class _ActiveQueueCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-                color: Colors.white.withOpacity(.2),
+                color: Colors.white.withValues(alpha: .2),
                 borderRadius: BorderRadius.circular(99)),
             child: Text(e.status.name.toUpperCase(),
                 style: const TextStyle(
@@ -570,7 +573,7 @@ class _ActiveQueueCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-                color: Colors.white.withOpacity(.15),
+                color: Colors.white.withValues(alpha: .15),
                 borderRadius: BorderRadius.circular(10)),
             child: const Row(children: [
               Icon(Icons.run_circle_outlined, color: Colors.white, size: 18),
@@ -624,7 +627,7 @@ class _AppointmentReminderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF7C3AED).withOpacity(.2)),
+        border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: .2)),
       ),
       child: Row(children: [
         Container(
@@ -732,7 +735,7 @@ class _RecommendationCard extends StatelessWidget {
         border: Border.all(color: Colors.grey.shade100),
         boxShadow: [BoxShadow(
             blurRadius: 6,
-            color: Colors.black.withOpacity(.04),
+            color: Colors.black.withValues(alpha: .04),
             offset: const Offset(0, 2))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

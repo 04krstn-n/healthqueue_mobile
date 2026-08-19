@@ -94,8 +94,11 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
   }
 
   void _back() {
-    if (_step == 1) Navigator.pop(context);
-    else setState(() => _step--);
+    if (_step == 1) {
+      Navigator.pop(context);
+    } else {
+      setState(() => _step--);
+    }
   }
 
   // ── Confirmation dialog ───────────────────────────────────────────────────
@@ -346,6 +349,10 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0, scrolledUnderElevation: 0,
         foregroundColor: AppColors.textDark,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _back,
+        ),
         title: Text('Join Queue — Step $_step of 3', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
       ),
       body: _loading
@@ -448,7 +455,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ]),
           ),
         );
-      }).toList(),
+      }),
     ]);
   }
 
@@ -464,7 +471,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Select Service', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
       const SizedBox(height: 4),
-      Text('${_clinic?.name ?? ''}', style: const TextStyle(fontSize: 12, color: Colors.black45)),
+      Text(_clinic?.name ?? '', style: const TextStyle(fontSize: 12, color: Colors.black45)),
       const SizedBox(height: 16),
       if (services.isEmpty)
         const Center(child: Padding(padding: EdgeInsets.all(32),
@@ -495,7 +502,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ]),
           ),
         );
-      }).toList(),
+      }),
     ]);
   }
 

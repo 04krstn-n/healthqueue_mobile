@@ -22,12 +22,11 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> {
   bool             _loading     = true;
   LatLng?          _userPos;
   Clinic?          _selected;
-  _RecClinic?      _selectedRec;
   Set<Marker>      _markers     = {};
   MapType          _mapType     = MapType.normal;
   String           _sortMode    = 'recommended';
   bool             _showCompare = false;
-  List<_RecClinic> _compareList = [];
+  final List<_RecClinic> _compareList = [];
 
   @override
   void initState() { super.initState(); _init(); }
@@ -50,8 +49,9 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> {
     try {
       if (!await Geolocator.isLocationServiceEnabled()) return;
       var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied)
+      if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
+      }
       if (perm == LocationPermission.deniedForever) return;
       final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high)
@@ -132,8 +132,7 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> {
   Future<void> _selectClinic(Clinic c, _RecClinic rec) async {
     final same = _selected?.id == c.id;
     setState(() {
-      _selected    = same ? null : c;
-      _selectedRec = same ? null : rec;
+      _selected = same ? null : c;
     });
     _rebuildMarkers();
     if (!same && c.hasLocation && _ctrl.isCompleted) {
@@ -285,7 +284,7 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> {
                             ),
                             boxShadow: sel
                                 ? [BoxShadow(blurRadius: 8,
-                                    color: AppColors.primary.withOpacity(.1))]
+                                    color: AppColors.primary.withValues(alpha: .1))]
                                 : [],
                           ),
                           child: Column(
@@ -418,7 +417,7 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> {
   Widget _infoChip(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-        color: color.withOpacity(.08),
+        color: color.withValues(alpha: .08),
         borderRadius: BorderRadius.circular(99)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 12, color: color), const SizedBox(width: 4),

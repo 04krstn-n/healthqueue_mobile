@@ -1,5 +1,6 @@
 /// Queue & shared data models
 /// Server queue statuses: waiting | serving | done | completed | cancelled | noShow | skipped
+library;
 
 import 'package:flutter/material.dart';
 
