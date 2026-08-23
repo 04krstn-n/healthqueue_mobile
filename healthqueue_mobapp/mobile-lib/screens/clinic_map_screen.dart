@@ -13,7 +13,7 @@ class ClinicMapScreen extends StatefulWidget {
   State<ClinicMapScreen> createState() => _ClinicMapScreenState();
 }
 
-class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingObserver {
+class _ClinicMapScreenState extends State<ClinicMapScreen> {
   final Completer<GoogleMapController> _ctrl = Completer();
   static const LatLng _default = LatLng(14.5995, 120.9842);
 
@@ -28,33 +28,8 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
   bool             _showCompare = false;
   final List<_RecClinic> _compareList = [];
 
-  // Why we don't have the patient's location yet, so we can show the right
-  // prompt instead of just silently falling back to the default map center.
-  // One of: null (fine / unknown), 'service_off', 'denied', 'denied_forever'.
-  String? _locationIssue;
-
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _init();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // If the patient backgrounds the app to turn location on in system
-    // settings, retry automatically when they come back instead of making
-    // them tap something.
-    if (state == AppLifecycleState.resumed && _userPos == null) {
-      _retryLocation();
-    }
-  }
+  void initState() { super.initState(); _init(); }
 
   Future<void> _init() async {
     await Future.wait([_loadClinics(), _locateUser()]);
@@ -72,68 +47,17 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
 
   Future<void> _locateUser() async {
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        if (mounted) setState(() => _locationIssue = 'service_off');
-        return;
-      }
+      if (!await Geolocator.isLocationServiceEnabled()) return;
       var perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.denied) {
-        if (mounted) setState(() => _locationIssue = 'denied');
-        return;
-      }
-      if (perm == LocationPermission.deniedForever) {
-        if (mounted) setState(() => _locationIssue = 'denied_forever');
-        return;
-      }
-
-      // Permission is granted at this point. High-accuracy GPS can be slow
-      // or unavailable indoors (and on many emulators with no simulated
-      // location set), so try it briefly, then fall back to a faster,
-      // lower-accuracy fix (network/cell-based) rather than just giving up.
-      Position? pos;
-      try {
-        pos = await Geolocator.getCurrentPosition(
-                desiredAccuracy: LocationAccuracy.high)
-            .timeout(const Duration(seconds: 6));
-      } on TimeoutException {
-        try {
-          pos = await Geolocator.getCurrentPosition(
-                  desiredAccuracy: LocationAccuracy.medium)
-              .timeout(const Duration(seconds: 6));
-        } catch (_) {
-          pos = null;
-        }
-      }
-
-      if (pos != null && mounted) {
-        setState(() {
-          _userPos = LatLng(pos!.latitude, pos.longitude);
-          _locationIssue = null;
-        });
-      } else if (mounted) {
-        // Permission granted, but no fix — a real, distinct state from
-        // "denied," since re-asking for permission won't fix this.
-        setState(() => _locationIssue = 'unavailable');
-      }
-    } catch (_) {
-      if (mounted && _userPos == null) {
-        setState(() => _locationIssue ??= 'unavailable');
-      }
-    }
-  }
-
-  // Re-runs location detection (e.g. after the patient returns from system
-  // settings) and refreshes distance-based sorting/markers if it succeeds.
-  Future<void> _retryLocation() async {
-    await _locateUser();
-    if (_userPos != null && mounted) {
-      _computeRecs();
-      _rebuildMarkers();
-      setState(() {});
-    }
+      if (perm == LocationPermission.deniedForever) return;
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high)
+          .timeout(const Duration(seconds: 10));
+      if (mounted) setState(() => _userPos = LatLng(pos.latitude, pos.longitude));
+    } catch (_) {}
   }
 
   void _computeRecs() {
@@ -223,29 +147,6 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
         CameraUpdate.newLatLngZoom(_userPos!, 14));
   }
 
-  Future<void> _handleLocationFix() async {
-    switch (_locationIssue) {
-      case 'service_off':
-        await Geolocator.openLocationSettings();
-        break;
-      case 'denied_forever':
-        await Geolocator.openAppSettings();
-        break;
-      case 'denied':
-      case 'unavailable':
-      default:
-        // 'denied' — just ask again, the system dialog handles it.
-        // 'unavailable' — permission's fine, just retry the fix (moving
-        // near a window, waiting for GPS to warm up, etc. helps here).
-        await _retryLocation();
-        return;
-    }
-    // Give the patient a moment to flip the setting before we re-check;
-    // didChangeAppLifecycleState also retries automatically on resume.
-    await Future.delayed(const Duration(milliseconds: 500));
-    await _retryLocation();
-  }
-
   void _toggleCompare(Clinic c) {
     final rec = _recommended.firstWhere(
       (r) => r.clinic.id == c.id,
@@ -324,9 +225,6 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
               ]),
             ),
           ),
-
-          if (_locationIssue != null && _userPos == null && !_loading)
-            _LocationPrompt(issue: _locationIssue!, onFix: _handleLocationFix),
 
           // Map
           SizedBox(
@@ -657,72 +555,4 @@ class _RecClinic {
   const _RecClinic({required this.clinic, required this.distKm,
       required this.waitMin, required this.queueLen,
       required this.score,   required this.explanation});
-}
-
-// ── Location prompt banner ─────────────────────────────────────────────────────
-// Shown above the map when we couldn't get the patient's location, so they
-// know why nearby clinics/distances aren't showing and can fix it in one tap
-// instead of the map silently defaulting to Manila.
-class _LocationPrompt extends StatelessWidget {
-  final String issue; // 'service_off' | 'denied' | 'denied_forever' | 'unavailable'
-  final VoidCallback onFix;
-  const _LocationPrompt({required this.issue, required this.onFix});
-
-  @override
-  Widget build(BuildContext context) {
-    final (text, cta) = switch (issue) {
-      'service_off' => (
-          'Location services are off, so we can\'t show your position or '
-              'sort clinics by distance.',
-          'Turn On Location',
-        ),
-      'denied_forever' => (
-          'Location access was denied. Enable it in Settings to see your '
-              'position and nearby clinics.',
-          'Open Settings',
-        ),
-      'unavailable' => (
-          'Location is allowed, but we couldn\'t get a GPS fix. Make sure '
-              'GPS is on and you have a clear signal (or set a location if '
-              'you\'re on an emulator), then retry.',
-          'Retry',
-        ),
-      _ => (
-          'Allow location access to see your position and sort clinics by '
-              'distance.',
-          'Allow Location',
-        ),
-    };
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: .06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.primary.withValues(alpha: .18)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.location_off_outlined, size: 18, color: AppColors.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(fontSize: 11.5, color: AppColors.textDark, height: 1.3)),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: onFix,
-            child: Text(cta,
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
-          ),
-        ],
-      ),
-    );
-  }
 }

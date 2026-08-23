@@ -7,12 +7,12 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Resolution order:
 ///   1. `API_BASE_URL` from `.env` (recommended — works for local, staging, prod)
 ///   2. Platform-aware localhost fallback, but ONLY in debug builds
-///   3. [prodFallbackUrl] below — points at the deployed server
+///   3. [prodFallbackUrl] below — set this to your Heroku app URL
 ///
-/// To point the app at the deployed server, create a `.env` file at the
+/// To point the app at your Heroku server, create a `.env` file at the
 /// project root (next to pubspec.yaml) containing:
 ///
-///   API_BASE_URL=https://api.healthqueue.org/api
+///   API_BASE_URL=https://<your-heroku-app-name>.herokuapp.com/api
 ///
 /// (Note the trailing /api — this app's ApiService appends paths like
 /// `/auth/login` directly onto baseUrl, unlike some other hq clients.)
@@ -20,8 +20,9 @@ class ApiConfig {
   ApiConfig._();
 
   /// Hard fallback used only if no .env is present and this isn't a debug
-  /// build.
-  static const String prodFallbackUrl = 'https://api.healthqueue.org/api';
+  /// build. Update this to your real Heroku URL + /api.
+  static const String prodFallbackUrl =
+      'https://REPLACE_WITH_YOUR_HEROKU_APP.herokuapp.com/api';
 
   static String get baseUrl {
     if (dotenv.isInitialized) {

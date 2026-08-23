@@ -74,150 +74,52 @@ class AppState extends ChangeNotifier {
   }
 
   /* ─────────────────────────────────────────────────────────
-     REGISTER
+     REGISTER — two-step: create account (server sends OTP) →
+     verify OTP (server returns token). Login itself never asks
+     for an OTP; this is the only place it's required.
   ───────────────────────────────────────────────────────── */
 
-  Future<void> register(Map<String, dynamic> body) async {
-    _isLoading = true;
-    notifyListeners();
-
-    final oldToken = await ApiService.getToken();
-
-    // IMPORTANT:
-    // Remove old patient's token before registering.
-    await ApiService.clearToken();
-
-    try {
-      final data = await ApiService.register(body);
-
-      final newToken = await ApiService.getToken();
-
-      if (newToken == null || newToken.isEmpty) {
-        final email = body['email']?.toString().trim() ?? '';
-        final password = body['password']?.toString() ?? '';
-
-        if (email.isNotEmpty && password.isNotEmpty) {
-          final loginData = await ApiService.login(
-            email,
-            password,
-          );
-
-          _currentUser = _userFromMap(
-            loginData['user'] ?? loginData,
-            fallback: body,
-          );
-        } else {
-          _currentUser = _userFromMap(
-            data['user'] ?? data,
-            fallback: body,
-          );
-        }
-      } else {
-        _currentUser = _userFromMap(
-          data['user'] ?? data,
-          fallback: body,
-        );
-      }
-
-      await Future.wait([
-        fetchAppointments(),
-        fetchQueueStatus(),
-      ]);
-
-      // The register/login response above may not carry every profile
-      // field (e.g. dateOfBirth lives on the Patient record, not on every
-      // server version's register/login payload). Pull /auth/me once the
-      // session is established so the Profile screen shows the real,
-      // server-side value rather than whatever subset came back locally.
-      await refreshProfile();
-    } catch (e) {
-      // Restore old token only when registration failed.
-      if (oldToken != null && await ApiService.getToken() == null) {
-        await ApiService.saveToken(oldToken);
-      }
-
-      rethrow;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  // Step 1 of phone-verified registration: creates the (unverified) account
-  // and has the server text an OTP via Semaphore. Returns the server's raw
-  // response (userId, message, and devOtp when running in SMS-mock mode) so
-  // the OTP screen can show it — otherwise a mock-mode registration leaves
-  // the user staring at an OTP field with no way to know the code.
-  Future<Map<String, dynamic>> beginRegistration(Map<String, dynamic> body) async {
+  /// Step 1 — creates the (unverified) account and triggers the server to
+  /// text an OTP to the phone number given. Returns the userId needed for
+  /// [verifyRegistrationOtp] / [resendRegistrationOtp].
+  Future<String> startRegistration(Map<String, dynamic> body) async {
     _isLoading = true;
     notifyListeners();
     try {
       final data = await ApiService.register(body);
       final userId = data['userId']?.toString();
       if (userId == null || userId.isEmpty) {
-        throw Exception('Registration succeeded but no user ID was returned.');
+        throw Exception('Registration succeeded but no account ID was returned.');
       }
-      return data;
+      return userId;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // Step 2: verifies the OTP against the server, then logs the now-verified
-  // patient in using the token the server returns.
-  Future<void> completeRegistration({
+  /// Step 2 — confirms the OTP and logs the newly-verified patient in.
+  Future<void> verifyRegistrationOtp({
     required String userId,
     required String otp,
-    required Map<String, dynamic> fallback,
   }) async {
     _isLoading = true;
     notifyListeners();
     try {
-      final data = await ApiService.verifyOtp(userId, otp);
-      _currentUser = _userFromMap(data['user'] ?? data, fallback: fallback);
-
+      final data = await ApiService.verifyOtp(userId: userId, otp: otp);
+      _currentUser = _userFromMap(data['user'] ?? data);
       await Future.wait([
         fetchAppointments(),
         fetchQueueStatus(),
       ]);
-
-      // verify-otp's response only carries the bare User record (no
-      // dateOfBirth, etc.) — the `fallback` above covers most cases, but
-      // relies on this screen instance having collected the original form
-      // data. When it hasn't (e.g. resuming verification for an account
-      // that registered earlier, then came back through Login), fallback
-      // is empty and dateOfBirth would otherwise be lost until some later
-      // refresh. Pulling /auth/me here guarantees the Profile screen has
-      // the real, server-side value the moment registration finishes.
-      await refreshProfile();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<Map<String, dynamic>> resendOtp(String userId) =>
+  Future<void> resendRegistrationOtp(String userId) =>
       ApiService.resendOtp(userId);
-
-  Future<void> registerUser({
-    required String fullName,
-    required String email,
-    required String phone,
-    required DateTime dob,
-    String gender = '',
-    required String password,
-  }) async {
-    await register({
-      'fullName': fullName,
-      'email': email,
-      'phone': phone,
-      'dateOfBirth': dob.toIso8601String(),
-      'gender': gender,
-      'password': password,
-      'role': 'patient',
-    });
-  }
 
   /* ─────────────────────────────────────────────────────────
      USER CONVERSION
@@ -659,13 +561,6 @@ class AppState extends ChangeNotifier {
 
   List<QueueEntry> get activeQueues =>
       _currentQueue == null ? [] : [_currentQueue!];
-
-  // True once the patient has actually picked a clinic — either by joining
-  // its queue or booking an appointment there. Mirrors the server's own
-  // resolvePatientClinicId fallback (queue entry, then appointment), and
-  // gates whether the chatbot is allowed to escalate to staff.
-  bool get hasSelectedClinic =>
-      _currentQueue != null || upcomingAppointments.isNotEmpty;
 
   // Local notifications are used for immediate in-app feedback for actions
   // such as leaving a queue. The server notification (if created by the

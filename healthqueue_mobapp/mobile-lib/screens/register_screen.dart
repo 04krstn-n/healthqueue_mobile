@@ -7,16 +7,7 @@ import '../state/app_state.dart';
 
 
 class RegisterScreen extends StatefulWidget {
-  // When set, the screen opens straight into the OTP step instead of the
-  // registration form — used when login reports an unverified account.
-  final String? initialUserId;
-  final String? initialPhone;
-
-  const RegisterScreen({
-    super.key,
-    this.initialUserId,
-    this.initialPhone,
-  });
+  const RegisterScreen({super.key});
   @override
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
@@ -31,21 +22,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _agreed         = false;
   bool _agreedError    = false; // Extra flag to handle visual checkbox error state
 
-  // OTP step (phone registration only) — the code itself is generated and
-  // verified server-side; this screen just tracks the pending account and a
-  // countdown that mirrors the server's 5-minute OTP expiry.
+  // OTP step (phone registration only)
   bool      _otpStep           = false;
   String    _pendingPhone      = '';
   String?   _pendingUserId;
-  Map<String, dynamic>? _pendingBody;
-  DateTime? _otpExpiry;
   int       _otpResendCooldown = 0;
-  int       _otpAttempts       = 0;
   Timer?    _otpTimer;
 
-  static const _otpValidSeconds    = 300; // matches server's 5-minute OTP expiry
   static const _resendCooldownSecs = 30;
-  static const _maxOtpAttempts     = 3;
 
   final _fullNameCtrl = TextEditingController();
   final _emailCtrl    = TextEditingController();
@@ -60,19 +44,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passRegex  = RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,}$');
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.initialUserId != null && widget.initialUserId!.isNotEmpty) {
-      _pendingUserId = widget.initialUserId;
-      _pendingPhone  = widget.initialPhone ?? '';
-      _otpStep       = true;
-      // Any OTP from the original registration may be long expired by now —
-      // request a fresh one as soon as this screen opens.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _resendOtp());
-    }
-  }
-
-  @override
   void dispose() {
     _otpTimer?.cancel();
     _fullNameCtrl.dispose(); _emailCtrl.dispose(); _phoneCtrl.dispose();
@@ -82,6 +53,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // ── OTP helpers ────────────────────────────────────────────────────────────
+  // The code itself is generated, sent, and checked server-side — this
+  // screen just calls the server and shows the result. See ApiService.register
+  // (sends it), verifyOtp (checks it), resendOtp.
   void _startCooldown() {
     _otpTimer?.cancel();
     setState(() => _otpResendCooldown = _resendCooldownSecs);
@@ -97,89 +71,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
   }
 
-  // Shows the server's OTP-send outcome. In normal (real-SMS) mode this is
-  // just a confirmation snackbar. If the server is running without a
-  // configured SMS provider (mock mode) or the SMS itself failed to send, the
-  // server includes `devOtp` in its response — surface it so the flow is
-  // still testable instead of leaving the user stuck with no way to receive
-  // a code.
-  void _showOtpStatus(Map<String, dynamic> data) {
-    final devOtp = data['devOtp']?.toString();
-    final message = data['message']?.toString();
-
-    if (devOtp != null && devOtp.isNotEmpty) {
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('SMS Not Sent',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-          content: Text(
-            '${message ?? "SMS could not be sent."}\n\nYour code: $devOtp',
-            style: const TextStyle(fontSize: 13),
-          ),
-          actions: [TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'))],
-        ),
-      );
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message ?? 'Verification code sent to your phone.'),
-      backgroundColor: AppColors.primary,
-    ));
-  }
-
-  // Asks the server to (re)send an OTP for the already-created pending
-  // account. The initial send happens as a side effect of registration
-  // itself (see _proceedToOtp), so this is used for the "Resend OTP" button.
   Future<void> _resendOtp() async {
     if (_pendingUserId == null) return;
-    _otpAttempts = 0;
-    _otpCtrl.clear();
-
     try {
-      final appState = context.read<AppState>();
-      final data = await appState.resendOtp(_pendingUserId!);
-      setState(() => _otpExpiry =
-          DateTime.now().add(const Duration(seconds: _otpValidSeconds)));
+      await context.read<AppState>().resendRegistrationOtp(_pendingUserId!);
+      _otpCtrl.clear();
       _startCooldown();
-      if (mounted) _showOtpStatus(data);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('A new code was sent to your phone.'),
+          backgroundColor: AppColors.primary,
+        ));
+      }
     } catch (e) {
       if (mounted) {
         await _showErrorDialog(
-          'OTP Not Sent',
+          'Could Not Resend Code',
           e.toString().replaceFirst('Exception: ', ''),
         );
       }
     }
-  }
-
-  bool get _otpExpired =>
-      _otpExpiry != null && DateTime.now().isAfter(_otpExpiry!);
-
-  int get _otpSecondsLeft =>
-      _otpExpiry == null ? 0
-      : _otpExpiry!.difference(DateTime.now()).inSeconds.clamp(0, _otpValidSeconds);
-
-  // Local, UX-only guards before we bother the server. The actual code check
-  // happens server-side in AppState.completeRegistration.
-  bool _canAttemptOtp() {
-    if (_otpExpired) {
-      _showErrorDialog('OTP Expired', 'Your OTP has expired. Please request a new one.');
-      return false;
-    }
-    if (_otpAttempts >= _maxOtpAttempts) {
-      _showErrorDialog('Too Many Attempts', 'Maximum attempts reached. Please resend OTP.');
-      return false;
-    }
-    if (_otpCtrl.text.trim().length != 6) {
-      _showErrorDialog('Invalid Code', 'Enter the 6-digit code sent to your phone.');
-      return false;
-    }
-    return true;
   }
 
   // System fallback dialog helper (Only used for fallback/network/OTP issues)
@@ -239,34 +150,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     final phone = _phoneCtrl.text.trim();
-    final body = {
-      'fullName': _fullNameCtrl.text.trim(),
-      'email': _emailCtrl.text.trim(),
-      'phone': phone,
-      'password': _passCtrl.text,
-      if (_dobCtrl.text.isNotEmpty) 'dateOfBirth': _dobCtrl.text,
-      'gender': _gender ?? '',
-      'role': 'patient',
-    };
-
     final appState = context.read<AppState>();
     if (appState.isLoading) return;
 
     try {
-      // Creates the (unverified) account and has the server text a real OTP.
-      final data = await appState.beginRegistration(body);
-      final userId = data['userId'].toString();
+      // Creates the account server-side and triggers the real SMS OTP.
+      final userId = await appState.startRegistration({
+        'fullName': _fullNameCtrl.text.trim(),
+        'email': _emailCtrl.text.trim(),
+        'phone': phone,
+        'password': _passCtrl.text,
+        if (_dobCtrl.text.isNotEmpty) 'dateOfBirth': _dobCtrl.text,
+        'gender': _gender ?? '',
+        'role': 'patient',
+      });
+
       setState(() {
-        _pendingPhone   = phone;
-        _pendingUserId  = userId;
-        _pendingBody    = body;
-        _otpStep        = true;
-        _otpAttempts    = 0;
-        _otpExpiry      = DateTime.now().add(const Duration(seconds: _otpValidSeconds));
+        _pendingPhone = phone;
+        _pendingUserId = userId;
+        _otpStep = true;
       });
       _otpCtrl.clear();
       _startCooldown();
-      if (mounted) _showOtpStatus(data);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
       if (msg.toLowerCase().contains('duplicate') ||
@@ -282,31 +187,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _verifyAndRegister() async {
-    if (!_canAttemptOtp()) return;
     if (_pendingUserId == null) return;
+    final otp = _otpCtrl.text.trim();
+    if (otp.length != 6) {
+      await _showErrorDialog('Invalid Code', 'Enter the 6-digit code sent to your phone.');
+      return;
+    }
 
     final appState = context.read<AppState>();
-    if (appState.isLoading) return;
-
     try {
-      await appState.completeRegistration(
-        userId: _pendingUserId!,
-        otp: _otpCtrl.text.trim(),
-        fallback: _pendingBody ?? const {},
-      );
+      await appState.verifyRegistrationOtp(userId: _pendingUserId!, otp: otp);
       if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.shell);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
-      if (msg.toLowerCase().contains('expired')) {
-        setState(() => _otpExpiry = DateTime.now().subtract(const Duration(seconds: 1)));
-        await _showErrorDialog('OTP Expired', 'Your OTP has expired. Please request a new one.');
-        return;
-      }
-      _otpAttempts++;
-      final left = _maxOtpAttempts - _otpAttempts;
-      await _showErrorDialog('Wrong OTP', left > 0
-          ? 'Incorrect code. $left attempt${left == 1 ? "" : "s"} remaining.'
-          : 'No attempts left. Please resend OTP.');
+      await _showErrorDialog('Verification Failed', msg);
     }
   }
 
@@ -343,30 +237,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   height: 1.5)),
           const SizedBox(height: 28),
 
-          // Expiry countdown
-          Builder(builder: (_) {
-            final left = _otpSecondsLeft;
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                _otpExpired ? 'OTP has expired'
-                    : 'Expires in ${left}s',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: _otpExpired ? Colors.red
-                      : left < 30 ? Colors.orange : Colors.green),
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: left / _otpValidSeconds,
-                  backgroundColor: Colors.grey.shade200,
-                  color: _otpExpired ? Colors.red
-                      : left < 30 ? Colors.orange : AppColors.primary,
-                  minHeight: 3,
-                ),
-              ),
-            ]);
-          }),
+          const Text(
+            'The code expires 5 minutes after it was sent.',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                color: Colors.black45),
+          ),
           const SizedBox(height: 20),
 
           TextField(

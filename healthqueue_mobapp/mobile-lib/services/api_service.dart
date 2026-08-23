@@ -5,23 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 
-/// Thrown by [ApiService.login] when the account exists and the password is
-/// correct, but the phone number was never OTP-verified. Carries what the
-/// OTP screen needs so the app can route straight back into verification
-/// instead of showing a generic "invalid credentials" error.
-class OtpRequiredException implements Exception {
-  final String userId;
-  final String phone;
-  final String message;
-  OtpRequiredException({
-    required this.userId,
-    required this.phone,
-    required this.message,
-  });
-  @override
-  String toString() => message;
-}
-
 /// Central API service for hq-mobapp-v2.
 /// Base URL is resolved by [ApiConfig] — see that file to point this at
 /// your Heroku server via a .env file.
@@ -121,20 +104,22 @@ class ApiService {
           body: jsonEncode({'email': email, 'password': password}),
         ));
 
+    // The server returns 403 + requiresVerification when a patient
+    // registered but never completed OTP verification — surface that as a
+    // distinct exception so the login screen can offer to resume
+    // verification instead of showing a generic "login failed" message.
     if (res.statusCode == 403) {
-      Map<String, dynamic>? body;
       try {
-        body = jsonDecode(res.body) as Map<String, dynamic>;
-      } catch (_) {}
-      if (body != null &&
-          body['requiresVerification'] == true &&
-          body['userId'] != null) {
-        throw OtpRequiredException(
-          userId: body['userId'].toString(),
-          phone: body['phone']?.toString() ?? '',
-          message: body['message']?.toString() ??
-              'Please verify your phone number before logging in.',
-        );
+        final e = jsonDecode(res.body) as Map<String, dynamic>;
+        if (e['requiresVerification'] == true && e['userId'] != null) {
+          throw UnverifiedAccountException(
+            (e['message'] as String?) ??
+                'Please verify your mobile number before logging in.',
+            userId: e['userId'].toString(),
+          );
+        }
+      } on FormatException {
+        // fall through to the generic error below
       }
     }
 
@@ -157,30 +142,33 @@ class ApiService {
     return data;
   }
 
-  // Verifies the OTP the server texted via Semaphore, and saves the session
-  // token the server returns once the code checks out.
-  static Future<Map<String, dynamic>> verifyOtp(
-      String userId, String otp) async {
+  // POST /api/auth/verify-otp — confirms the code the server texted to the
+  // phone number given at registration, and returns a token on success.
+  // Registration itself is the only place OTP is required — a verified
+  // patient's regular login never asks for a code again.
+  static Future<Map<String, dynamic>> verifyOtp({
+    required String userId,
+    required String otp,
+  }) async {
     final res = await _once(() => http.post(
           Uri.parse('$baseUrl/auth/verify-otp'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'userId': userId, 'otp': otp}),
         ));
-    _assertOk(res, 'OTP verification failed.');
+    _assertOk(res, 'Verification failed. Please check the code and try again.');
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     if (data['token'] != null) await saveToken(data['token'] as String);
     return data;
   }
 
-  // Asks the server to text a fresh OTP to the pending account.
-  static Future<Map<String, dynamic>> resendOtp(String userId) async {
+  // POST /api/auth/resend-otp
+  static Future<void> resendOtp(String userId) async {
     final res = await _once(() => http.post(
           Uri.parse('$baseUrl/auth/resend-otp'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'userId': userId}),
         ));
-    _assertOk(res, 'Failed to resend OTP.');
-    return jsonDecode(res.body) as Map<String, dynamic>;
+    _assertOk(res, 'Failed to resend the verification code.');
   }
 
   static Future<Map<String, dynamic>> getMe() async {
@@ -579,36 +567,16 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  // Result of an escalation attempt. `ok` is true only when the server
-  // actually escalated. `requiresClinic` distinguishes "you need to pick a
-  // clinic first" from a generic failure so the UI can show the right nudge.
-  static Future<({bool ok, bool requiresClinic, String? message})> escalateChatbot({
-    String? logId,
-    String? note,
-    String? clinicId,
-  }) async {
+  static Future<bool> escalateChatbot({String? note}) async {
     try {
       final res = await _once(() async => http.post(
             Uri.parse('$baseUrl/chatbot/escalate'),
             headers: await _authHeaders(),
-            body: jsonEncode({
-              if (logId != null) 'logId': logId,
-              if (clinicId != null && clinicId.isNotEmpty) 'clinicId': clinicId,
-              'note': note ?? '',
-            }),
+            body: jsonEncode({'note': note ?? ''}),
           ));
-      Map<String, dynamic>? body;
-      try {
-        body = jsonDecode(res.body) as Map<String, dynamic>;
-      } catch (_) {}
-      final ok = res.statusCode >= 200 && res.statusCode < 300;
-      return (
-        ok: ok,
-        requiresClinic: body?['requiresClinic'] == true,
-        message: body?['message']?.toString(),
-      );
+      return res.statusCode >= 200 && res.statusCode < 300;
     } catch (_) {
-      return (ok: false, requiresClinic: false, message: null);
+      return false;
     }
   }
 
@@ -708,6 +676,14 @@ class QueueConflictException implements Exception {
   final String message;
   final Map<String, dynamic>? existingEntry;
   const QueueConflictException(this.message, {this.existingEntry});
+  @override
+  String toString() => message;
+}
+
+class UnverifiedAccountException implements Exception {
+  final String message;
+  final String userId;
+  const UnverifiedAccountException(this.message, {required this.userId});
   @override
   String toString() => message;
 }

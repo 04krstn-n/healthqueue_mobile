@@ -20,14 +20,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   final _scrollCtrl = ScrollController();
   bool _escalated = false;
   bool _sending   = false;
-  String? _lastLogId;
-
-  // A clinic the patient explicitly picked from the chat (separate from
-  // whatever clinic they may already have via an active queue/appointment).
-  // Lets escalation reach staff even when the patient hasn't joined a
-  // queue or booked an appointment yet.
-  String? _selectedClinicId;
-  String? _selectedClinicName;
 
   // ── Quick reply chips ─────────────────────────────────────────────────────
   // These MUST exactly match or be contained by the local-handler conditions below
@@ -37,7 +29,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     'Book an appointment',
     'Find clinic near me',
     'Estimated wait time',
-    'Select clinic',
     'Talk to staff',
   ];
 
@@ -68,102 +59,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         );
       }
     });
-  }
-
-  // Best clinic name we currently know about: an explicit pick from this
-  // chat session takes priority, then whatever clinic the patient already
-  // has via an active queue or upcoming appointment.
-  String? _effectiveClinicName(AppState appState) {
-    if (_selectedClinicName != null) return _selectedClinicName;
-    if (appState.currentQueue != null) return appState.currentQueue!.clinicName;
-    if (appState.upcomingAppointments.isNotEmpty) {
-      final name = appState.upcomingAppointments.first.clinicName;
-      if (name.isNotEmpty) return name;
-    }
-    return null;
-  }
-
-  // Lets the patient explicitly choose which clinic their question/escalation
-  // should go to, instead of only relying on an active queue or appointment.
-  Future<void> _pickClinic() async {
-    List<dynamic> clinics = [];
-    try {
-      clinics = await ApiService.getClinicDirectory();
-    } catch (_) {}
-    if (!mounted) return;
-    if (clinics.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Could not load the clinic list. Check your connection and try again.'),
-      ));
-      return;
-    }
-
-    final selected = await showModalBottomSheet<Map<String, String>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ClinicPickerSheet(clinics: clinics),
-    );
-
-    if (selected != null && mounted) {
-      setState(() {
-        _selectedClinicId = selected['id'];
-        _selectedClinicName = selected['name'];
-      });
-    }
-  }
-
-  // Handles a "talk to staff" request end-to-end: resolves (or asks for) a
-  // clinic, sends the escalation, and always leaves a clear, visible
-  // confirmation message in the chat feed — not just the small header badge,
-  // which is easy to miss.
-  Future<void> _escalateToStaff(AppState appState, {required String note}) async {
-    String? clinicId = _selectedClinicId;
-    String? clinicName = _effectiveClinicName(appState);
-
-    // Nothing to go on at all — ask the patient to pick a clinic right here
-    // instead of just telling them to go join a queue first.
-    if (clinicId == null && !appState.hasSelectedClinic) {
-      appState.addBotText(
-        "I'd like to connect you with staff, but I don't know which clinic to alert yet. "
-        "Please pick a clinic below, or join a queue / book an appointment first.",
-      );
-      await _pickClinic();
-      if (_selectedClinicId == null) return; // patient dismissed the picker
-      clinicId = _selectedClinicId;
-      clinicName = _selectedClinicName;
-    }
-
-    appState.addBotText(
-      "Connecting you with staff${clinicName != null ? ' at $clinicName' : ''}. One moment…",
-    );
-
-    final result = await ApiService.escalateChatbot(
-      logId: _lastLogId,
-      note: note,
-      clinicId: clinicId,
-    );
-
-    if (result.ok) {
-      setState(() => _escalated = true);
-      appState.addBotText(
-        "✅ Staff${clinicName != null ? ' at $clinicName' : ''} have been notified of your request "
-        "and will follow up shortly. The \"Staff notified\" badge above will stay on while it's pending.",
-      );
-    } else if (result.requiresClinic) {
-      appState.addBotText(
-        result.message ?? 'Please select a clinic before requesting staff assistance.',
-      );
-      await _pickClinic();
-      if (_selectedClinicId != null && mounted) {
-        await _escalateToStaff(appState, note: note); // retry once with the picked clinic
-      }
-    } else {
-      appState.addBotText(
-        "I couldn't reach staff just now. Please try again in a moment, or visit the clinic "
-        "reception desk directly for anything urgent.",
-      );
-    }
   }
 
   // ── Local intent matching — handles common phrases WITHOUT hitting server ──
@@ -285,29 +180,22 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       return true;
     }
 
-    // 8. Select / change clinic — lets the patient pick explicitly instead
-    // of only relying on an active queue or appointment.
-    if (l.contains('select clinic') || l.contains('choose clinic') ||
-        l.contains('pick clinic') || l.contains('change clinic')) {
-      await _pickClinic();
-      if (_selectedClinicId != null) {
-        appState.addBotText(
-          "Got it — I'll route any staff requests to $_selectedClinicName.",
-          quickReplies: ['Talk to staff'],
-        );
-      }
-      return true;
-    }
-
-    // 9. Talk to staff / escalate
+    // 8. Talk to staff / escalate
     if (l.contains('talk to staff') || l.contains('staff') ||
         l.contains('human') || l.contains('real person') ||
         l.contains('escalate') || l.contains('complaint')) {
-      await _escalateToStaff(appState, note: msg);
+      appState.addBotText(
+        "I understand you need staff assistance. I'm flagging your concern to our "
+        "healthcare team. Someone will review it shortly. For urgent matters, "
+        "please visit the clinic reception desk directly.",
+        quickReplies: ['Find clinic near me'],
+      );
+      setState(() => _escalated = true);
+      ApiService.escalateChatbot(note: msg).catchError((_) => false);
       return true;
     }
 
-    // 10. Greetings — handle locally, no server round-trip needed
+    // 9. Greetings — handle locally, no server round-trip needed
     if (l == 'hi' || l == 'hello' || l == 'hey' || l == 'hi po' ||
         l == 'hello po' || l.startsWith('good morning') ||
         l.startsWith('good afternoon') || l.startsWith('good evening') ||
@@ -324,7 +212,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       return true;
     }
 
-    // 11. Thanks / done
+    // 10. Thanks / done
     if (l == 'thanks' || l == 'thank you' || l == 'salamat' ||
         l == 'ok thanks' || l == 'thank you po' || l == 'salamat po') {
       appState.addBotText(
@@ -353,10 +241,9 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     try {
       final res = await ApiService.sendChatMessage(msg);
 
-      // Server returns { response, reply, source, isEscalated, logId }
+      // Server returns { response, reply, source, isEscalated }
       final reply = (res['response'] ?? res['reply'] ?? res['answer'] ?? '')
           .toString().trim();
-      _lastLogId = res['logId']?.toString();
 
       if (reply.isEmpty) {
         // Server returned empty — shouldn't happen with the new controller
@@ -368,17 +255,9 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         appState.addBotText(reply);
       }
 
-      // If server flagged this for escalation, update UI AND leave a clear
-      // confirmation in the chat feed — the header badge alone is easy to
-      // miss, which was leaving patients unsure whether anything actually
-      // happened.
+      // If server flagged this for escalation, update UI
       if (res['isEscalated'] == true) {
         setState(() => _escalated = true);
-        final clinicName = _effectiveClinicName(appState);
-        appState.addBotText(
-          "✅ I've flagged this to staff${clinicName != null ? ' at $clinicName' : ''}. "
-          "They'll follow up shortly. You'll see a \"Staff notified\" badge above while it's pending.",
-        );
       }
     } catch (e) {
       // If Rasa/API is unavailable, keep the old local shortcuts as fallback.
@@ -397,9 +276,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
 @override
   Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
-    final messages = appState.messages;
-    final clinicChipLabel = _effectiveClinicName(appState) ?? 'Select clinic';
+    final messages = context.watch<AppState>().messages;
 
     return SafeArea(
       bottom: false, // Prevents interfering with the keyboard and bottom input bar
@@ -438,33 +315,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                       Text('Ask me anything about your clinic visit',
                           style: TextStyle(color: Colors.white60, fontSize: 10)),
                     ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: _pickClinic,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    margin: const EdgeInsets.only(right: 6),
-                    constraints: const BoxConstraints(maxWidth: 110),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: .18),
-                        borderRadius: BorderRadius.circular(99)),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.local_hospital_outlined,
-                            size: 11, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(clinicChipLabel,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
                 if (_escalated)
@@ -710,87 +560,6 @@ class _MessageBubble extends StatelessWidget {
           ),
           if (isUser) const SizedBox(width: 8),
         ],
-      ),
-    );
-  }
-}
-
-// ── Clinic picker sheet ─────────────────────────────────────────────────────────
-// Lets the patient explicitly choose which clinic a staff escalation (or the
-// conversation in general) should be routed to. Pops {'id', 'name'} for the
-// tapped clinic, or null if dismissed.
-class _ClinicPickerSheet extends StatelessWidget {
-  final List<dynamic> clinics;
-  const _ClinicPickerSheet({required this.clinics});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        constraints:
-            BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(99))),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Select a Clinic',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                        color: AppColors.textDark)),
-              ),
-            ),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                itemCount: clinics.length,
-                separatorBuilder: (_, __) =>
-                    Divider(height: 1, color: Colors.grey.shade100),
-                itemBuilder: (ctx, i) {
-                  final raw = clinics[i];
-                  final m = raw is Map
-                      ? Map<String, dynamic>.from(raw)
-                      : <String, dynamic>{};
-                  final id = m['_id']?.toString() ?? m['id']?.toString() ?? '';
-                  final name = m['name']?.toString() ?? 'Clinic';
-                  final address = m['address']?.toString() ??
-                      m['city']?.toString() ??
-                      '';
-                  return ListTile(
-                    leading: const Icon(Icons.local_hospital_outlined,
-                        color: AppColors.primary),
-                    title: Text(name,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13)),
-                    subtitle: address.isNotEmpty
-                        ? Text(address, style: const TextStyle(fontSize: 11))
-                        : null,
-                    onTap: id.isEmpty
-                        ? null
-                        : () => Navigator.pop(context, {'id': id, 'name': name}),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
       ),
     );
   }

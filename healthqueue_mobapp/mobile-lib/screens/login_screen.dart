@@ -4,8 +4,6 @@ import '../core/constants/app_colors.dart';
 import '../widgets/pill_toggle.dart';
 import 'package:provider/provider.dart';
 import '../state/app_state.dart';
-import '../services/api_service.dart';
-import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -48,15 +46,6 @@ class _LoginScreenState extends State<LoginScreen> {
           identifier: identifier, password: pass);
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, AppRoutes.shell);
-    } on OtpRequiredException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      Navigator.push(context, MaterialPageRoute(
-        builder: (_) => RegisterScreen(
-          initialUserId: e.userId,
-          initialPhone: e.phone,
-        ),
-      ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
