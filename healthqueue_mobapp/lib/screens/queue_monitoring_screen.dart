@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../services/api_service.dart';
+import '../services/queue_socket_service.dart';
 import '../state/app_state.dart';
 
 class QueueMonitoringScreen extends StatefulWidget {
@@ -24,7 +25,11 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
   bool _showNextWarning = false;
   // Called notification shown only once per call event
   bool _calledBannerShown = false;
-  static const _pollInterval = Duration(seconds: 15);
+  // Socket.io now pushes queue changes instantly (see QueueSocketService) —
+  // this poll is kept only as a safety net in case the socket briefly drops,
+  // so the interval was relaxed from 15s to 45s.
+  static const _pollInterval = Duration(seconds: 45);
+  final QueueSocketService _socket = QueueSocketService();
 
   @override
   void initState() {
@@ -38,19 +43,49 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _socket.disconnect();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Resume polling when app comes back to foreground
+    // Resume polling (and the socket connection) when the app comes back to
+    // the foreground; drop both while backgrounded to save battery/data.
     if (state == AppLifecycleState.resumed) {
       _timer?.cancel();
       _fetch();
       _timer = Timer.periodic(_pollInterval, (_) => _fetch());
     } else if (state == AppLifecycleState.paused) {
       _timer?.cancel();
+      _socket.disconnect();
     }
+  }
+
+  /// Joins the clinic's Socket.io room so queue changes (called, requeued,
+  /// completed, etc.) refresh this screen instantly instead of waiting for
+  /// the next poll. No-ops if already connected to this clinic.
+  void _connectSocket(String? clinicId) {
+    if (clinicId == null || clinicId.isEmpty) return;
+    _socket.connect(
+      clinicId,
+      onQueueUpdated: (_) {
+        if (mounted) _fetch();
+      },
+    );
+  }
+
+  String? _extractClinicId(Map<String, dynamic> normalized) {
+    final entry = normalized['entry'];
+    if (entry is Map) {
+      final clinic = entry['clinic'];
+      if (clinic is Map) {
+        final id = clinic['_id'] ?? clinic['id'];
+        if (id != null) return id.toString();
+      } else if (clinic is String && clinic.isNotEmpty) {
+        return clinic;
+      }
+    }
+    return null;
   }
 
   Future<void> _fetch({bool manual = false}) async {
@@ -94,6 +129,9 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       // entry is returned.
       if (normalized['inQueue'] == true) {
         await appState.fetchQueueStatus();
+        _connectSocket(_extractClinicId(normalized));
+      } else {
+        _socket.disconnect();
       }
 
       setState(() {

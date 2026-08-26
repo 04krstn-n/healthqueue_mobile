@@ -54,6 +54,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Timer? _timer;
 
+  bool _isClinicOpen(Clinic c) {
+    return c.status.toLowerCase() == 'open';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -191,7 +195,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final user = _userPos;
 
-    final scored = _clinics.where((c) => c.status == 'open').map((c) {
+    final scored = _clinics.where(_isClinicOpen).map((c) {
       final dist = (user != null && c.hasLocation)
           ? _distKm(
               user,
@@ -687,7 +691,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Text(
                           _clinicsLoad
                               ? 'Loading clinics…'
-                              : '${_clinics.where((c) => c.status == "open").length} clinics open nearby',
+                              : '${_clinics.where(_isClinicOpen).length} clinics open nearby',
                           style: const TextStyle(
                             fontSize: 12,
                             color: Colors.white70,
