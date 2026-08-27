@@ -464,6 +464,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
         id: entryId,
         entryId: entryId,
         queueNumber: queueNumber,
+        clinicId: _clinic!.id,
         clinicName: _clinic!.name,
         serviceName: _service!,
         patientName: user?.fullName ?? '',
@@ -1399,44 +1400,31 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: PatientType.values.map(
-            (t) {
-              final selected = _pType == t;
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _pType = t;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: selected ? AppColors.primary : Colors.white,
-                    borderRadius: BorderRadius.circular(99),
-                    border: Border.all(
-                      color:
-                          selected ? AppColors.primary : Colors.grey.shade200,
-                    ),
-                  ),
-                  child: Text(
-                    _patientTypeLabel(t),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: selected ? Colors.white : Colors.black54,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ).toList(),
+        // Read-only — patient type comes from the patient's own account
+        // (verified by clinic staff, see PatientType docs) and is never
+        // something the patient selects here. This used to be a row of
+        // tappable chips letting the patient pick any type including
+        // "Priority"; the value was never actually sent to the server (the
+        // join request doesn't include it), so it didn't affect real queue
+        // placement — but it was still misleading UI implying otherwise.
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 8,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+          ),
+          child: Text(
+            _patientTypeLabel(_pType),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primary,
+            ),
+          ),
         ),
         const SizedBox(height: 16),
         const Text(

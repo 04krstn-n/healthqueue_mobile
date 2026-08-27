@@ -65,6 +65,7 @@ extension PatientTypeLabel on PatientType {
 // ─────────────────────────────────────────────────────────────────
 enum QueueStatus {
   waiting,
+  called,
   serving,
   completed,
   cancelled,
@@ -81,6 +82,7 @@ enum QueueType { regular, priority }
 class QueueEntry {
   final String      id;
   final String      queueNumber;
+  final String      clinicId;
   final String      clinicName;
   final String      serviceName;
   final String      patientName;
@@ -102,10 +104,17 @@ class QueueEntry {
   final String?   doctorId;
   final String?   doctorName;
   final int       totalAhead;
+  // When the patient must arrive by, once called — server sends this as
+  // entry.gracePeriodExpiresAt (see queueController.callPatient). Screens
+  // previously looked for a top-level `graceRemaining` (minutes) field that
+  // the server never actually sends, so the countdown never worked; this
+  // stores the real timestamp so screens can compute remaining time themselves.
+  final DateTime? gracePeriodExpiresAt;
 
   QueueEntry({
     required this.id,
     String?       queueNumber,
+    String?       clinicId,
     String?       clinicName,
     String?       serviceName,
     String?       patientName,
@@ -123,7 +132,9 @@ class QueueEntry {
     this.doctorId,
     this.doctorName,
     int?          totalAhead,
+    this.gracePeriodExpiresAt,
   })  : queueNumber              = queueNumber   ?? '',
+        clinicId                 = clinicId      ?? '',
         clinicName               = clinicName    ?? '',
         serviceName              = serviceName   ?? '',
         patientName              = patientName   ?? '',
@@ -140,6 +151,7 @@ class QueueEntry {
   static QueueStatus parseStatus(String? s) {
     switch (s) {
       case 'waiting':   return QueueStatus.waiting;
+      case 'called':    return QueueStatus.called;
       case 'serving':   return QueueStatus.serving;
       case 'done':
       case 'completed': return QueueStatus.completed;
@@ -153,10 +165,33 @@ class QueueEntry {
 
   bool get isActive =>
       status == QueueStatus.waiting ||
+      status == QueueStatus.called ||
       status == QueueStatus.serving ||
       status == QueueStatus.pending;
 
-  bool get isCalled => status == QueueStatus.serving;
+  // Staff has called this patient to the counter and they haven't arrived
+  // yet — distinct from `serving` (staff has started actively serving them
+  // after they arrived). The server's real lifecycle is
+  // waiting -> called -> serving -> completed (see queueController.js
+  // callPatient/startService), but this enum previously had no `called`
+  // value at all, so parseStatus('called') silently fell through to
+  // `pending` and every "You're being called!" banner in the app checked
+  // `status == QueueStatus.serving` instead — meaning patients were only
+  // ever notified one step too late, once staff had already started
+  // serving someone else's ticket ahead of them arriving.
+  bool get isCalled => status == QueueStatus.called;
+
+  // Minutes left in the arrival grace period, or null if not applicable /
+  // already expired. Computed client-side from the server's absolute
+  // gracePeriodExpiresAt timestamp rather than trusting any pre-computed
+  // "remaining minutes" value, which would go stale between polls.
+  int? get graceMinutesRemaining {
+    if (gracePeriodExpiresAt == null) return null;
+    final diff = gracePeriodExpiresAt!.difference(DateTime.now());
+    if (diff.isNegative) return null;
+    final mins = (diff.inSeconds / 60).ceil();
+    return mins > 0 ? mins : null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -196,6 +231,7 @@ class QueueJoinResult {
   final String    id;
   final String    entryId;
   final String    queueNumber;
+  final String    clinicId;
   final String    clinicName;
   final String    serviceName;
   final String    patientName;
@@ -217,6 +253,7 @@ class QueueJoinResult {
     String?       id,
     String?       entryId,
     String?       queueNumber,
+    String?       clinicId,
     String?       clinicName,
     String?       serviceName,
     required this.patientName,
@@ -236,6 +273,7 @@ class QueueJoinResult {
   })  : id                       = id          ?? entryId ?? '',
         entryId                  = entryId     ?? id      ?? '',
         queueNumber              = queueNumber ?? '',
+        clinicId                 = clinicId    ?? '',
         clinicName               = clinicName  ?? '',
         serviceName              = serviceName ?? '',
         departmentId             = departmentId  ?? '',

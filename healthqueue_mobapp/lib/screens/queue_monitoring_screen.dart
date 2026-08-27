@@ -101,28 +101,42 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
 
       final normalized = _normalizeQueueResponse(res);
 
-      // If the server response is temporarily empty, keep the queue that was
-      // already saved by Join Queue in AppState. This makes the queue visible
-      // immediately after joining instead of showing "not in any queue".
-      if (normalized['inQueue'] != true && appState.currentQueue != null) {
-        final local = appState.currentQueue!;
-        final localMap = _queueEntryToMap(local);
-        final fallback = <String, dynamic>{
-          'inQueue': true,
-          'entry': localMap,
-          'position': local.position,
-          'peopleAhead': local.totalAhead,
-          'estimatedWaitTime': local.estimatedWait,
-        };
+      // If the server response is empty, reconcile with AppState before
+      // deciding what to show. fetchQueueStatus() applies the same 8-second
+      // post-join grace period (see AppState) — within it we keep showing
+      // the optimistic local queue so it doesn't flash away right after
+      // Join Queue; past it, a null response means the queue genuinely
+      // ended (completed/cancelled/no-show), so AppState clears
+      // currentQueue and we fall through to the real "not in queue" state
+      // below instead of getting stuck showing a stale status forever.
+      if (normalized['inQueue'] != true) {
+        if (appState.currentQueue != null) {
+          await appState.fetchQueueStatus();
+        }
+        if (!mounted) return;
 
-        setState(() {
-          _status = fallback;
-          _loading = false;
-          _refreshing = false;
-          _error = '';
-        });
-        _checkPositionChanges(fallback);
-        return;
+        if (appState.currentQueue != null) {
+          final local = appState.currentQueue!;
+          final localMap = _queueEntryToMap(local);
+          final fallback = <String, dynamic>{
+            'inQueue': true,
+            'entry': localMap,
+            'position': local.position,
+            'peopleAhead': local.totalAhead,
+            'estimatedWaitTime': local.estimatedWait,
+          };
+
+          setState(() {
+            _status = fallback;
+            _loading = false;
+            _refreshing = false;
+            _error = '';
+          });
+          _checkPositionChanges(fallback);
+          return;
+        }
+
+        _socket.disconnect();
       }
 
       // Keep AppState synchronized with the server whenever a real queue
@@ -130,8 +144,6 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       if (normalized['inQueue'] == true) {
         await appState.fetchQueueStatus();
         _connectSocket(_extractClinicId(normalized));
-      } else {
-        _socket.disconnect();
       }
 
       setState(() {
@@ -280,13 +292,17 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
           (_) => _showYoureNextModal(qNum, prevNoShow: prevNoShow));
     }
 
-    // ── Being called / serving ──────────────────────────────────────────
-    if (status == 'serving' && !_calledBannerShown) {
+    // ── Being called ─────────────────────────────────────────────────────
+    // Was: status == 'serving' — the server's actual "called to counter"
+    // status is 'called' (see queue_models.dart QueueEntry.isCalled for the
+    // full explanation of the waiting -> called -> serving -> completed
+    // lifecycle this app previously didn't distinguish).
+    if (status == 'called' && !_calledBannerShown) {
       _calledBannerShown = true;
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _showCalledModal(qNum));
     }
-    if (status != 'serving') _calledBannerShown = false;
+    if (status != 'called') _calledBannerShown = false;
 
     // ── Status changed: cancelled / completed ───────────────────────────
     if (_prevStatus.isNotEmpty &&
@@ -523,13 +539,13 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Leave Queue?',
+        title: const Text('Cancel Queue?',
             style: TextStyle(fontWeight: FontWeight.w800)),
-        content: const Text('You will lose your current queue position.'),
+        content: const Text('Are you sure you want to cancel your queue?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('No, Stay')),
+              child: const Text('Keep Queue')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -537,7 +553,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Yes, Leave'),
+            child: const Text('Cancel'),
           ),
         ],
       ),
@@ -609,10 +625,26 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     final ahead = _toInt(_inQueue ? _status!['peopleAhead'] : 0);
     final wait = _toInt(_inQueue ? _status!['estimatedWaitTime'] : 0);
     final qStatus = entry?['status']?.toString() ?? '';
-    final called = qStatus == 'serving';
-    final graceRem = _status?['graceRemaining'] == null
-        ? null
-        : _toInt(_status!['graceRemaining']);
+    // Was: qStatus == 'serving' — one step too late; see queue_models.dart
+    // QueueEntry.isCalled for why. The server's real "called" status is
+    // literally the string 'called'.
+    final called = qStatus == 'called';
+    // Was: _status?['graceRemaining'] — the server never sends a
+    // top-level "graceRemaining" minutes field; it sends the absolute
+    // timestamp entry.gracePeriodExpiresAt (see queueController.callPatient),
+    // so this always read null and the countdown never actually worked.
+    // Compute remaining minutes client-side from that timestamp instead.
+    final graceExpiresRaw = entry?['gracePeriodExpiresAt']?.toString();
+    final graceExpiresAt =
+        graceExpiresRaw == null ? null : DateTime.tryParse(graceExpiresRaw);
+    int? graceRem;
+    if (graceExpiresAt != null) {
+      final diff = graceExpiresAt.difference(DateTime.now());
+      if (!diff.isNegative) {
+        final mins = (diff.inSeconds / 60).ceil();
+        graceRem = mins > 0 ? mins : null;
+      }
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7FB),
@@ -864,6 +896,13 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                                         ? AppColors.primary
                                         : Colors.grey.shade300),
                                 _timelineItem(
+                                    'Called to counter',
+                                    qStatus == 'called' ? 'Now' : '—',
+                                    qStatus == 'called',
+                                    qStatus == 'called'
+                                        ? const Color(0xFF16A34A)
+                                        : Colors.grey.shade300),
+                                _timelineItem(
                                     'Being served',
                                     qStatus == 'serving' ? 'Now' : '—',
                                     qStatus == 'serving',
@@ -920,6 +959,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
   }
 
   double _progressValue(String status, int pos, int ahead) {
+    if (status == 'called') return 0.85;
     if (status == 'serving') return 0.9;
     if (status == 'done' || status == 'completed') return 1.0;
     if (pos == 1) return 0.75;
@@ -1024,6 +1064,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
   Widget _statusChip(String s) {
     final map = {
       'waiting': [Colors.orange.shade50, Colors.orange.shade700],
+      'called': [const Color(0xFFF0FDF4), const Color(0xFF16A34A)],
       'serving': [const Color(0xFFF0FDF4), const Color(0xFF16A34A)],
       'done': [const Color(0xFFF0FDF4), const Color(0xFF16A34A)],
       'completed': [const Color(0xFFF0FDF4), const Color(0xFF16A34A)],

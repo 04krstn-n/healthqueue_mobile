@@ -905,7 +905,12 @@ class _ActiveQueueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final e = queueEntry;
-    final isCalled = e.status == QueueStatus.serving;
+    // Was: e.status == QueueStatus.serving — the server's real lifecycle is
+    // waiting -> called -> serving -> completed, so this fired one step too
+    // late (only once staff started actively serving, not when they were
+    // first called to the counter). e.isCalled now correctly checks for the
+    // `called` status — see queue_models.dart.
+    final isCalled = e.isCalled;
 
     return Container(
       padding: const EdgeInsets.all(16),

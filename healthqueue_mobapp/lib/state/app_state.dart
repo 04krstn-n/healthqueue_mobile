@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../services/api_service.dart';
+import '../services/queue_socket_service.dart';
 import '../models/appointment_models.dart';
 import '../models/queue_models.dart';
 import '../models/chat_models.dart';
@@ -391,6 +392,9 @@ class AppState extends ChangeNotifier {
     _appointments = [];
     _currentQueue = null;
     _chatMessages = [];
+    _chatHistoryLoaded = false;
+    _pendingCallPopup = null;
+    _queueSocket.disconnect();
 
     notifyListeners();
   }
@@ -652,6 +656,36 @@ class AppState extends ChangeNotifier {
 
   QueueEntry? _currentQueue;
   bool _queueLoading = false;
+  // Only trust a freshly-joined local queue for a short grace period —
+  // long enough for the very next poll to confirm it server-side, but not
+  // so long that it masks a real completion/cancellation. Previously the
+  // null-entry branch in fetchQueueStatus() never actually cleared a
+  // populated _currentQueue, so once the server correctly stopped
+  // returning a completed/cancelled entry (see getMyQueueStatus — it only
+  // matches status waiting/called/serving), the screen kept showing the
+  // last known state ("serving") forever.
+  DateTime? _localQueueSetAt;
+
+  // Single shared Socket.IO connection for real-time queue updates, owned
+  // here (rather than per-screen) so it stays live across the whole app —
+  // previously only QueueMonitoringScreen opened a socket, so patients on
+  // any other tab (Dashboard, Chat, etc.) never got a push update at all
+  // and had to wait for that screen's own periodic poll.
+  final QueueSocketService _queueSocket = QueueSocketService();
+
+  // Set the instant the server reports a transition into `called`; cleared
+  // by the UI via dismissCallPopup() once it has shown the popup. This is
+  // the one-shot signal the global popup (see AppShell) watches for — the
+  // edge-detection in fetchQueueStatus() (comparing wasCalled vs isCalled)
+  // is what actually prevents duplicate popups for the same call event.
+  QueueEntry? _pendingCallPopup;
+
+  QueueEntry? get pendingCallPopup => _pendingCallPopup;
+
+  void dismissCallPopup() {
+    _pendingCallPopup = null;
+    notifyListeners();
+  }
 
   QueueEntry? get currentQueue => _currentQueue;
 
@@ -715,6 +749,11 @@ class AppState extends ChangeNotifier {
     _queueLoading = true;
     notifyListeners();
 
+    // Captured before any reassignment below, so we can detect the exact
+    // moment the server transitions this patient into `called` — used for
+    // the one-shot popup notification (see _pendingCallPopup below).
+    final wasCalled = _currentQueue?.isCalled ?? false;
+
     try {
       final data = await ApiService.getMyQueueStatus();
 
@@ -727,25 +766,41 @@ class AppState extends ChangeNotifier {
       }
 
       // Do not erase a queue that was just saved locally when the server
-      // response is temporarily incomplete. This is especially important
-      // immediately after joining a queue.
+      // response is temporarily incomplete — but only within a short grace
+      // period after joining. Past that, a null entry means the queue
+      // genuinely ended (completed/cancelled/no-show), so trust the server.
       if (rawEntry is! Map) {
-        if (_currentQueue == null) {
+        final withinGracePeriod = _localQueueSetAt != null &&
+            DateTime.now().difference(_localQueueSetAt!) < const Duration(seconds: 8);
+        if (!withinGracePeriod) {
           _currentQueue = null;
+          // No active queue left to watch — release the socket connection
+          // instead of leaving it idly joined to a clinic room.
+          _queueSocket.disconnect();
         }
         return;
       }
 
       final e = Map<String, dynamic>.from(rawEntry);
 
+      String clinicIdStr = '';
       String clinicName = '';
       dynamic clinic = e['clinic'];
 
       if (clinic is Map) {
+        clinicIdStr = clinic['_id']?.toString() ?? clinic['id']?.toString() ?? '';
         clinicName = clinic['name']?.toString() ??
             clinic['clinicName']?.toString() ??
             '';
-      } else if (e['clinicName'] != null) {
+      } else if (clinic != null) {
+        // Some responses send just the raw clinic id string instead of a
+        // populated object.
+        clinicIdStr = clinic.toString();
+      }
+      if (clinicIdStr.isEmpty && e['clinicId'] != null) {
+        clinicIdStr = e['clinicId'].toString();
+      }
+      if (e['clinicName'] != null) {
         clinicName = e['clinicName'].toString();
       }
 
@@ -787,10 +842,15 @@ class AppState extends ChangeNotifier {
 
       final queueId = e['_id']?.toString() ?? e['id']?.toString() ?? '';
 
+      DateTime? graceExpiry = DateTime.tryParse(
+        e['gracePeriodExpiresAt']?.toString() ?? '',
+      );
+
       _currentQueue = QueueEntry(
         id: queueId,
         queueNumber:
             e['queueNumber']?.toString() ?? e['queueNo']?.toString() ?? 'N/A',
+        clinicId: clinicIdStr,
         clinicName: clinicName,
         serviceName: serviceName,
         patientName: _currentUser?.fullName ?? '',
@@ -808,7 +868,31 @@ class AppState extends ChangeNotifier {
         serviceId: e['serviceId']?.toString(),
         doctorId: e['doctorId']?.toString(),
         doctorName: e['doctorName']?.toString(),
+        gracePeriodExpiresAt: graceExpiry,
       );
+      // We now have a confirmed server entry, so the post-join optimism
+      // window is no longer needed — the next null response should be
+      // trusted immediately.
+      _localQueueSetAt = null;
+
+      // Keep the shared socket connected to this queue's clinic room.
+      // QueueSocketService.connect() already no-ops if it's already
+      // connected to the same clinic, so calling this on every fetch
+      // (poll or socket-triggered) never creates duplicate connections
+      // or duplicate listeners.
+      if (clinicIdStr.isNotEmpty) {
+        _queueSocket.connect(
+          clinicIdStr,
+          onQueueUpdated: (_) => fetchQueueStatus(),
+        );
+      }
+
+      // Fire the "you're being called" popup exactly once per call event —
+      // only on the transition INTO `called`, never while it stays called
+      // across repeated polls/socket pings within the same session.
+      if (!wasCalled && _currentQueue!.isCalled) {
+        _pendingCallPopup = _currentQueue;
+      }
     } catch (e) {
       debugPrint('fetchQueueStatus error: $e');
       // Keep the locally saved queue instead of replacing it with null.
@@ -822,6 +906,7 @@ class AppState extends ChangeNotifier {
     _currentQueue = QueueEntry(
       id: result.entryId.isNotEmpty ? result.entryId : result.id,
       queueNumber: result.queueNumber,
+      clinicId: result.clinicId,
       clinicName: result.clinicName,
       serviceName: result.serviceName,
       patientName: _currentUser?.fullName ?? result.patientName,
@@ -840,6 +925,16 @@ class AppState extends ChangeNotifier {
       doctorId: result.doctorId,
       doctorName: result.doctorName,
     );
+    _localQueueSetAt = DateTime.now();
+
+    // Connect immediately at join time rather than waiting for the next
+    // poll/refresh — no-ops if already connected to this clinic.
+    if (result.clinicId.isNotEmpty) {
+      _queueSocket.connect(
+        result.clinicId,
+        onQueueUpdated: (_) => fetchQueueStatus(),
+      );
+    }
 
     notifyListeners();
   }
@@ -861,6 +956,9 @@ class AppState extends ChangeNotifier {
 
   void cancelQueueLocally() {
     _currentQueue = null;
+    _localQueueSetAt = null;
+    _pendingCallPopup = null;
+    _queueSocket.disconnect();
     notifyListeners();
   }
 
@@ -940,6 +1038,53 @@ class AppState extends ChangeNotifier {
         'Wait time',
       ],
     );
+  }
+
+  bool _chatHistoryLoaded = false;
+
+  // Loads the patient's last 7 days of chatbot conversation from the server
+  // (GET /chatbot/history) so it's available again after closing the chat
+  // screen or restarting the app, instead of only living in memory for the
+  // current session. Each ChatLog entry becomes a user bubble + bot reply
+  // bubble, in chronological order, matching how they were actually sent.
+  // Only fetched once per app session — calling this repeatedly (e.g. every
+  // time the chat screen opens) would keep prepending/duplicating history.
+  Future<void> loadChatHistory() async {
+    if (_chatHistoryLoaded) return;
+    _chatHistoryLoaded = true;
+    try {
+      final history = await ApiService.getChatHistory();
+      if (history.isEmpty) {
+        seedChatIfEmpty();
+        return;
+      }
+      final restored = <ChatMessage>[];
+      for (final raw in history) {
+        if (raw is! Map) continue;
+        final m = Map<String, dynamic>.from(raw);
+        final ts = DateTime.tryParse(m['createdAt']?.toString() ?? '') ??
+            DateTime.now();
+        final userMsg = m['message']?.toString() ?? '';
+        final botReply = m['reply']?.toString() ?? '';
+        if (userMsg.isNotEmpty) {
+          restored.add(ChatMessage(text: userMsg, isUser: true, timestamp: ts));
+        }
+        if (botReply.isNotEmpty) {
+          restored.add(ChatMessage(text: botReply, isUser: false, timestamp: ts));
+        }
+      }
+      if (restored.isNotEmpty) {
+        _chatMessages = restored;
+        notifyListeners();
+      } else {
+        seedChatIfEmpty();
+      }
+    } catch (e) {
+      debugPrint('loadChatHistory error: $e');
+      // Fall back to the normal greeting rather than leaving the screen
+      // blank if history couldn't be loaded (e.g. offline).
+      seedChatIfEmpty();
+    }
   }
 
   void clearChat() {

@@ -579,6 +579,20 @@ class ApiService {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  // GET /chatbot/history — the patient's own conversation history for the
+  // last 7 days (server-enforced retention — see ChatLog's TTL index).
+  // Each item is one exchange: { message, reply, createdAt, ... }.
+  static Future<List<dynamic>> getChatHistory() async {
+    final res = await _withRetry(() async => http.get(
+        Uri.parse('$baseUrl/chatbot/history'),
+        headers: await _authHeaders()));
+    if (res.statusCode != 200) return [];
+    final data = jsonDecode(res.body);
+    if (data is List) return data;
+    if (data is Map) return (data['data'] ?? data['history'] ?? []) as List;
+    return [];
+  }
+
   // Result of an escalation attempt. `ok` is true only when the server
   // actually escalated. `requiresClinic` distinguishes "you need to pick a
   // clinic first" from a generic failure so the UI can show the right nudge.

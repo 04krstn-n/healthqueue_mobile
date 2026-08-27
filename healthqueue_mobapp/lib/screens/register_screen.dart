@@ -777,8 +777,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         items: const [
           DropdownMenuItem(value: 'Male', child: Text('Male', style: TextStyle(fontSize: 13))),
           DropdownMenuItem(value: 'Female', child: Text('Female', style: TextStyle(fontSize: 13))),
-          DropdownMenuItem(value: 'Other', child: Text('Other', style: TextStyle(fontSize: 13))),
-          DropdownMenuItem(value: 'Prefer not to say', child: Text('Prefer not to say', style: TextStyle(fontSize: 13))),
         ],
         onChanged: (v) => setState(() => _gender = v),
       ),

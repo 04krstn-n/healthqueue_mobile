@@ -123,7 +123,31 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     }
   }
 
-  void _cancel(String id) {
+  Future<void> _cancel(String id) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Cancel Appointment?',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        content: const Text('Are you sure you want to cancel this appointment?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Appointment')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10))),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     context.read<AppState>().updateAppointment(id, status: apt.AppointmentStatus.cancelled);
   }
 

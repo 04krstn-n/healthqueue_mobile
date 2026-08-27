@@ -44,9 +44,13 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      context.read<AppState>().seedChatIfEmpty();
+      // Loads the last 7 days of conversation from the server (falls back
+      // to the normal greeting if there's no history yet or it can't be
+      // reached) instead of always starting from a blank slate.
+      await context.read<AppState>().loadChatHistory();
+      if (!mounted) return;
       _scrollToBottom();
     });
   }

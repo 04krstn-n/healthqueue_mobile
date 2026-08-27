@@ -33,6 +33,27 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    // Patient type must come from the patient's own account (verified by
+    // clinic staff), never a manual in-flow selection — this used to
+    // default to PatientType.regular unconditionally with no way to reflect
+    // an actual senior/PWD/pregnant/priority account, and was then
+    // editable via tappable chips further down this screen.
+    final user = context.read<AppState>().currentUser;
+    if (user != null && user.patientType.isNotEmpty) {
+      const map = {
+        'Regular': PatientType.regular,
+        'Senior Citizen': PatientType.priority,
+        'PWD': PatientType.priority,
+        'Pregnant': PatientType.priority,
+        'Priority': PatientType.priority,
+      };
+      _patientType = map[user.patientType] ?? PatientType.regular;
+    }
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final args = ModalRoute.of(context)?.settings.arguments;
@@ -306,7 +327,6 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
                 date:        _selectedDate!,
                 time:        _selectedTime!,
                 patientType: _patientType,
-                onPatientType: (p) => setState(() => _patientType = p),
                 notesCtrl:   _notesCtrl,
                 error:       _error,
                 booking:     _booking,
@@ -507,7 +527,6 @@ class _StepConfirm extends StatelessWidget {
   final DateTime                  date;
   final String                    time;
   final PatientType               patientType;
-  final void Function(PatientType) onPatientType;
   final TextEditingController     notesCtrl;
   final String?                   error;
   final bool                      booking;
@@ -516,7 +535,7 @@ class _StepConfirm extends StatelessWidget {
   const _StepConfirm({
     required this.clinic, required this.serviceName,
     required this.date, required this.time,
-    required this.patientType, required this.onPatientType,
+    required this.patientType,
     required this.notesCtrl, required this.error,
     required this.booking, required this.onConfirm,
   });
@@ -542,23 +561,17 @@ class _StepConfirm extends StatelessWidget {
         const SizedBox(height: 16),
         const Text('Patient Type', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8, runSpacing: 8,
-          children: PatientType.values.map((t) {
-            final sel = patientType == t;
-            return GestureDetector(
-              onTap: () => onPatientType(t),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: sel ? AppColors.primary : Colors.white,
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: sel ? AppColors.primary : Colors.grey.shade200),
-                ),
-                child: Text(t.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: sel ? Colors.white : Colors.black54)),
-              ),
-            );
-          }).toList(),
+        // Read-only — see initState in _BookAppointmentScreenState for why
+        // this comes from the account instead of being picked here.
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+          ),
+          child: Text(patientType.label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
         ),
         const SizedBox(height: 16),
         const Text('Notes (optional)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),

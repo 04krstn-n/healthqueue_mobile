@@ -112,14 +112,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           _showEditPersonal(context, appState);
                         },
                       ),
-                      _ActionRow(
-                        icon: Icons.medical_information_outlined,
-                        label: 'Edit Medical Information',
-                        onTap: () {
-                          Navigator.pop(context);
-                          _showEditMedical(context, appState);
-                        },
-                      ),
                     ],
                   ),
                 ),
@@ -223,27 +215,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     value: user.patientType.isNotEmpty
                         ? user.patientType
                         : 'Regular',
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 14),
-
-              // MEDICAL INFORMATION
-              _SectionCard(
-                title: 'Medical Information',
-                icon: Icons.medical_information_outlined,
-                onEdit: null,
-                children: [
-                  _InfoRow(
-                    label: 'PhilHealth Number',
-                    value: user.philHealthNumber.isNotEmpty
-                        ? user.philHealthNumber
-                        : '—',
-                  ),
-                  _InfoRow(
-                    label: 'HMO Number',
-                    value: user.hmoNumber.isNotEmpty ? user.hmoNumber : '—',
                   ),
                 ],
               ),
@@ -367,10 +338,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 items: const [
                   DropdownMenuItem(value: 'Male', child: Text('Male')),
                   DropdownMenuItem(value: 'Female', child: Text('Female')),
-                  DropdownMenuItem(value: 'Other', child: Text('Other')),
-                  DropdownMenuItem(
-                      value: 'Prefer not to say',
-                      child: Text('Prefer not to say')),
                 ],
                 onChanged: (v) => setSt(() => gender = v ?? ''),
               ),
@@ -451,194 +418,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ── Edit Medical Info sheet ───────────────────────────────────────────────
-  void _showEditMedical(BuildContext ctx, AppState appState) {
-    final u = appState.currentUser!;
-
-    final philCtrl = TextEditingController(
-      text: u.philHealthNumber,
-    );
-
-    final hmoCtrl = TextEditingController(
-      text: u.hmoNumber,
-    );
-
-    String patientType = u.patientType.isNotEmpty ? u.patientType : 'Regular';
-
-    bool saving = false;
-
-    showModalBottomSheet(
-      context: ctx,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) => StatefulBuilder(
-        builder: (_, setSt) => _Sheet(
-          title: 'Edit Medical Info',
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Patient Type',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppColors.textDark,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                Row(
-                  children: [
-                    'Regular',
-                    'Senior',
-                    'PWD',
-                    'Priority',
-                  ].map((t) {
-                    final selected = patientType == t;
-
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: GestureDetector(
-                        onTap: () {
-                          setSt(() {
-                            patientType = t;
-                          });
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 7,
-                          ),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? AppColors.primary
-                                : const Color(0xFFF0F0F0),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: selected
-                                  ? AppColors.primary
-                                  : Colors.transparent,
-                            ),
-                          ),
-                          child: Text(
-                            t,
-                            style: TextStyle(
-                              color:
-                                  selected ? Colors.white : AppColors.textDark,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 14),
-
-                // PHILHEALTH NUMBER
-                _Field(
-                  ctrl: philCtrl,
-                  label: 'PhilHealth Number',
-                  icon: Icons.badge_outlined,
-                  type: TextInputType.number,
-                ),
-
-                // HMO NUMBER
-                _Field(
-                  ctrl: hmoCtrl,
-                  label: 'HMO Number',
-                  icon: Icons.health_and_safety_outlined,
-                  type: TextInputType.text,
-                ),
-                const SizedBox(height: 8),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            setSt(() {
-                              saving = true;
-                            });
-
-                            try {
-                              await appState.updateCurrentUserProfile(
-                                patientType: patientType,
-
-                                // IMPORTANT:
-                                // Send the actual text entered by user.
-                                philHealthNumber: philCtrl.text.trim(),
-
-                                hmoNumber: hmoCtrl.text.trim(),
-                              );
-
-                              if (sheetCtx.mounted) {
-                                Navigator.pop(sheetCtx);
-                              }
-
-                              if (ctx.mounted) {
-                                _snack(
-                                  ctx,
-                                  'Medical information updated!',
-                                );
-                              }
-                            } catch (e) {
-                              if (sheetCtx.mounted) {
-                                setSt(() {
-                                  saving = false;
-                                });
-                              }
-
-                              if (ctx.mounted) {
-                                _snack(
-                                  ctx,
-                                  'Error: ${e.toString().replaceAll('Exception: ', '')}',
-                                  error: true,
-                                );
-                              }
-                            }
-                          },
-                    child: saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text(
-                            'Save Changes',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   // ── Notification Preferences sheet ───────────────────────────────────────
   void _showNotifPrefs(BuildContext ctx) {
