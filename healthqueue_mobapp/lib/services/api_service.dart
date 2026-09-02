@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../config/api_config.dart';
 
@@ -338,6 +339,100 @@ class ApiService {
   // We only try an alternate route when the previous route explicitly says
   // that the route/method is not usable (403/404/405). A successful request
   // immediately returns so the cancellation is never duplicated.
+  // ── Patient Type Request (Senior/PWD/Pregnant verification) ────────────────
+  // Patients can no longer set their own patientType (see AppState —
+  // updateCurrentUserProfile no longer sends it); this is the real channel:
+  // submit a photo of the ID/certificate, staff review and approve/reject.
+  // Maps a file extension to a MIME type the server's multer fileFilter
+  // will accept (see middleware/upload.js's allowed list). Falls back to
+  // image/jpeg — nearly every phone camera produces JPEG by default, and
+  // an image_picker temp path with an unrecognized/missing extension is
+  // far more likely to be a JPEG than anything else.
+  static MediaType _imageContentType(String path) {
+    final ext = path.toLowerCase().split('.').last;
+    switch (ext) {
+      case 'png':  return MediaType('image', 'png');
+      case 'webp': return MediaType('image', 'webp');
+      case 'heic': return MediaType('image', 'heic');
+      case 'heif': return MediaType('image', 'heif');
+      case 'jpg':
+      case 'jpeg':
+      default:     return MediaType('image', 'jpeg');
+    }
+  }
+
+  static Future<Map<String, dynamic>> submitPatientTypeRequest({
+    required String requestedType,
+    required File photo,
+  }) async {
+    final uri = Uri.parse('$baseUrl/patient-type-requests');
+    final req = http.MultipartRequest('POST', uri);
+    // Only add Authorization here — NOT the rest of _authHeaders(), which
+    // hardcodes 'Content-Type': 'application/json'. That was overwriting
+    // the 'multipart/form-data; boundary=...' header MultipartRequest sets
+    // automatically, so the server could never actually parse the body
+    // (and the global JSON parser choked trying to read binary multipart
+    // data as JSON, which is why the error came back as an unparseable
+    // HTML page instead of a real message).
+    final token = await getToken();
+    if (token != null) req.headers['Authorization'] = 'Bearer $token';
+    req.fields['requestedType'] = requestedType;
+    // Explicitly set the content type from the file extension instead of
+    // letting http.MultipartFile.fromPath() guess it — camera-captured
+    // photos' temp file paths don't always have an extension the guesser
+    // recognizes, in which case it silently falls back to
+    // 'application/octet-stream'. The server correctly rejects that (it
+    // can't be sure it's actually an image), but the real fix is to never
+    // send an ambiguous content type in the first place.
+    req.files.add(await http.MultipartFile.fromPath(
+      'photo',
+      photo.path,
+      contentType: _imageContentType(photo.path),
+    ));
+
+    http.Response res;
+    try {
+      // Image uploads need more room than the general 20s mutate timeout —
+      // given its own timeout here rather than reusing _once() (which
+      // would apply a shorter one meant for small JSON payloads).
+      final streamed = await req.send().timeout(const Duration(seconds: 45));
+      res = await http.Response.fromStream(streamed);
+    } on TimeoutException {
+      throw Exception('The upload timed out. Please check your connection and try again.');
+    } on SocketException {
+      throw Exception('No internet connection. Please check your network.');
+    }
+    _assertOk(res, 'Failed to submit request.');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // getMyPatientTypeRequest -> GET /patient-type-requests/mine: the most
+  // recent request (or null if none exists yet), so the app can show its
+  // status (pending/approved/rejected) instead of the patient wondering
+  // whether their submission went through.
+  static Future<Map<String, dynamic>?> getMyPatientTypeRequest() async {
+    final res = await _once(() async => http.get(
+        Uri.parse('$baseUrl/patient-type-requests/mine'),
+        headers: await _authHeaders()));
+    if (res.statusCode != 200) return null;
+    final body = jsonDecode(res.body);
+    final data = body is Map ? body['data'] : null;
+    return data is Map<String, dynamic> ? data : null;
+  }
+
+  // markOnTheWay -> PUT /queues/:id/on-the-way (patient-only). Does NOT
+  // change queue status — only notifies staff (via socket) that the
+  // patient acknowledged being called and is heading over. Fire-and-forget
+  // from the caller's side; this method itself still surfaces errors so
+  // callers can choose to ignore them.
+  static Future<void> markOnTheWay(String id) async {
+    final res = await _once(() async => http.put(
+          Uri.parse('$baseUrl/queues/$id/on-the-way'),
+          headers: await _authHeaders(),
+        ));
+    _assertOk(res, 'Failed to notify staff.');
+  }
+
   static Future<bool> cancelQueue(String id) async {
     var queueId = id.trim();
 

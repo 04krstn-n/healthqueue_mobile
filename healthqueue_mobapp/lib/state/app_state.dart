@@ -687,6 +687,24 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Guards against the exact bug that caused 5 duplicate "you're being
+  // called" popups and a status that appeared stuck on `called`: this app
+  // has several independent triggers for fetchQueueStatus() (AppState's own
+  // socket, DashboardScreen's poll, and — until this fix — QueueMonitoring-
+  // Screen's own separate poll+socket), and Flutter's IndexedStack keeps
+  // every tab's screen alive in the background, so ALL of them fire at once
+  // the moment staff calls a patient. Without this guard, each concurrent
+  // call independently read the OLD "not called yet" state before any of
+  // the others had finished, so each one independently decided "this is a
+  // fresh call" and queued its own popup — and, worse, an OLDER request
+  // could resolve AFTER a NEWER one and silently overwrite fresh "serving"
+  // data with stale "called" data. Only the most-recently-STARTED call is
+  // now allowed to commit its result.
+  int _queueFetchGeneration = 0;
+
+  String? _queueError;
+  String? get queueError => _queueError;
+
   QueueEntry? get currentQueue => _currentQueue;
 
   bool get queueLoading => _queueLoading;
@@ -753,9 +771,18 @@ class AppState extends ChangeNotifier {
     // moment the server transitions this patient into `called` — used for
     // the one-shot popup notification (see _pendingCallPopup below).
     final wasCalled = _currentQueue?.isCalled ?? false;
+    final myGen = ++_queueFetchGeneration;
 
     try {
       final data = await ApiService.getMyQueueStatus();
+
+      // A newer fetchQueueStatus() call has started (and possibly already
+      // finished) since this one began — its result is stale. Discard it
+      // entirely rather than letting an out-of-order response overwrite
+      // fresher data or fire a duplicate popup.
+      if (myGen != _queueFetchGeneration) return;
+
+      _queueError = null;
 
       // The API can return the queue under entry, queue, or data.
       // Normalize all of those shapes before reading the values.
@@ -895,9 +922,20 @@ class AppState extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('fetchQueueStatus error: $e');
+      // Ignore a stale/superseded call's failure — a newer call already
+      // started (or finished) since this one began, so its error doesn't
+      // reflect the current state.
+      if (myGen == _queueFetchGeneration) {
+        _queueError = 'Unable to reach the server. Pull down to retry.';
+      }
       // Keep the locally saved queue instead of replacing it with null.
     } finally {
-      _queueLoading = false;
+      // Same staleness guard as above — an older, already-discarded call
+      // finishing after a newer one started shouldn't clear the loading
+      // flag out from under the newer call that's still in flight.
+      if (myGen == _queueFetchGeneration) {
+        _queueLoading = false;
+      }
       notifyListeners();
     }
   }

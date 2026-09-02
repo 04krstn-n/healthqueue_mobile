@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../services/api_service.dart';
-import '../services/queue_socket_service.dart';
 import '../state/app_state.dart';
 
 class QueueMonitoringScreen extends StatefulWidget {
@@ -15,7 +14,6 @@ class QueueMonitoringScreen extends StatefulWidget {
 
 class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     with WidgetsBindingObserver {
-  Timer? _timer;
   Map<String, dynamic>? _status;
   bool _loading = true;
   bool _refreshing = false;
@@ -25,214 +23,107 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
   bool _showNextWarning = false;
   // Called notification shown only once per call event
   bool _calledBannerShown = false;
-  // Socket.io now pushes queue changes instantly (see QueueSocketService) —
-  // this poll is kept only as a safety net in case the socket briefly drops,
-  // so the interval was relaxed from 15s to 45s.
-  static const _pollInterval = Duration(seconds: 45);
-  final QueueSocketService _socket = QueueSocketService();
+  AppState? _appState;
 
+  // This screen used to run its OWN Socket.IO connection and its own 45s
+  // Timer.periodic poll, completely independent of AppState's. Because
+  // Flutter's IndexedStack (see app.dart) keeps every tab's screen alive in
+  // the background — this screen never actually got disposed just by
+  // switching tabs — that meant THREE independent, uncoordinated triggers
+  // (this screen's poll+socket, AppState's own socket, and Dashboard's own
+  // poll) all fired at once the moment staff called a patient. Each one
+  // independently decided "this is a fresh call" before any of the others
+  // had finished, producing multiple duplicate popups — and, worse, an
+  // older response could land after a newer one and silently overwrite
+  // fresh "serving" data with stale "called" data, making the status look
+  // stuck. This screen is now a pure listener of AppState (the single
+  // source of truth, itself now guarded against exactly that race — see
+  // AppState.fetchQueueStatus's generation counter) instead of running its
+  // own parallel fetch pipeline.
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _fetch();
-    _timer = Timer.periodic(_pollInterval, (_) => _fetch());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final appState = context.read<AppState>();
+    if (_appState != appState) {
+      _appState?.removeListener(_onAppStateChanged);
+      _appState = appState;
+      _appState!.addListener(_onAppStateChanged);
+      _syncFromAppState();
+      // Ask for a fresh read the moment this screen is actually viewed.
+      // Safe to call even if AppState's socket/Dashboard's poll already has
+      // one in flight — fetchQueueStatus()'s generation guard means this
+      // can only ever help, never race.
+      appState.fetchQueueStatus();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
-    _socket.disconnect();
+    _appState?.removeListener(_onAppStateChanged);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Resume polling (and the socket connection) when the app comes back to
-    // the foreground; drop both while backgrounded to save battery/data.
+    // Ask for a fresh read when the app comes back to the foreground —
+    // AppState's own socket/lifecycle handling covers keeping data current
+    // otherwise; this is just a one-shot nudge, not a new polling loop.
     if (state == AppLifecycleState.resumed) {
-      _timer?.cancel();
-      _fetch();
-      _timer = Timer.periodic(_pollInterval, (_) => _fetch());
-    } else if (state == AppLifecycleState.paused) {
-      _timer?.cancel();
-      _socket.disconnect();
+      context.read<AppState>().fetchQueueStatus();
     }
   }
 
-  /// Joins the clinic's Socket.io room so queue changes (called, requeued,
-  /// completed, etc.) refresh this screen instantly instead of waiting for
-  /// the next poll. No-ops if already connected to this clinic.
-  void _connectSocket(String? clinicId) {
-    if (clinicId == null || clinicId.isEmpty) return;
-    _socket.connect(
-      clinicId,
-      onQueueUpdated: (_) {
-        if (mounted) _fetch();
-      },
-    );
+  void _onAppStateChanged() {
+    if (!mounted) return;
+    _syncFromAppState();
   }
 
-  String? _extractClinicId(Map<String, dynamic> normalized) {
-    final entry = normalized['entry'];
-    if (entry is Map) {
-      final clinic = entry['clinic'];
-      if (clinic is Map) {
-        final id = clinic['_id'] ?? clinic['id'];
-        if (id != null) return id.toString();
-      } else if (clinic is String && clinic.isNotEmpty) {
-        return clinic;
-      }
+  /// Rebuilds this screen's `_status` map (the shape the rendering code
+  /// below already expects) from AppState.currentQueue — the single,
+  /// centrally-updated source of truth — instead of fetching independently.
+  void _syncFromAppState() {
+    final appState = _appState ?? context.read<AppState>();
+    final q = appState.currentQueue;
+
+    Map<String, dynamic>? next;
+    if (q != null) {
+      next = <String, dynamic>{
+        'inQueue': true,
+        'entry': _queueEntryToMap(q),
+        'position': q.position,
+        'peopleAhead': q.totalAhead,
+        'estimatedWaitTime': q.estimatedWait,
+      };
     }
-    return null;
+
+    setState(() {
+      _status = next;
+      _loading = false;
+      _refreshing = false;
+      _error = next == null ? (appState.queueError ?? '') : '';
+    });
+
+    if (next != null) _checkPositionChanges(next);
   }
 
+  /// Manual refresh (pull-to-refresh / retry button) — routes through
+  /// AppState's single, generation-guarded fetchQueueStatus() rather than
+  /// calling the API directly, so this can never race with the automatic
+  /// updates driven by AppState's socket or Dashboard's poll.
   Future<void> _fetch({bool manual = false}) async {
     if (manual && mounted) {
       setState(() => _refreshing = true);
     }
-
-    final appState = context.read<AppState>();
-
-    try {
-      final res = await ApiService.getMyQueueStatus();
-      if (!mounted) return;
-
-      final normalized = _normalizeQueueResponse(res);
-
-      // If the server response is empty, reconcile with AppState before
-      // deciding what to show. fetchQueueStatus() applies the same 8-second
-      // post-join grace period (see AppState) — within it we keep showing
-      // the optimistic local queue so it doesn't flash away right after
-      // Join Queue; past it, a null response means the queue genuinely
-      // ended (completed/cancelled/no-show), so AppState clears
-      // currentQueue and we fall through to the real "not in queue" state
-      // below instead of getting stuck showing a stale status forever.
-      if (normalized['inQueue'] != true) {
-        if (appState.currentQueue != null) {
-          await appState.fetchQueueStatus();
-        }
-        if (!mounted) return;
-
-        if (appState.currentQueue != null) {
-          final local = appState.currentQueue!;
-          final localMap = _queueEntryToMap(local);
-          final fallback = <String, dynamic>{
-            'inQueue': true,
-            'entry': localMap,
-            'position': local.position,
-            'peopleAhead': local.totalAhead,
-            'estimatedWaitTime': local.estimatedWait,
-          };
-
-          setState(() {
-            _status = fallback;
-            _loading = false;
-            _refreshing = false;
-            _error = '';
-          });
-          _checkPositionChanges(fallback);
-          return;
-        }
-
-        _socket.disconnect();
-      }
-
-      // Keep AppState synchronized with the server whenever a real queue
-      // entry is returned.
-      if (normalized['inQueue'] == true) {
-        await appState.fetchQueueStatus();
-        _connectSocket(_extractClinicId(normalized));
-      }
-
-      setState(() {
-        _status = normalized;
-        _loading = false;
-        _refreshing = false;
-        _error = '';
-      });
-      _checkPositionChanges(normalized);
-    } catch (e) {
-      if (!mounted) return;
-
-      // Even if the status request fails, show the queue that was just saved
-      // locally after a successful Join Queue operation.
-      final local = appState.currentQueue;
-      if (local != null) {
-        final fallback = <String, dynamic>{
-          'inQueue': true,
-          'entry': _queueEntryToMap(local),
-          'position': local.position,
-          'peopleAhead': local.totalAhead,
-          'estimatedWaitTime': local.estimatedWait,
-        };
-        setState(() {
-          _status = fallback;
-          _loading = false;
-          _refreshing = false;
-          _error = '';
-        });
-        _checkPositionChanges(fallback);
-        return;
-      }
-
-      setState(() {
-        _error = e.toString().replaceAll('Exception: ', '');
-        _loading = false;
-        _refreshing = false;
-      });
-    }
-  }
-
-  Map<String, dynamic> _normalizeQueueResponse(Map<String, dynamic> raw) {
-    dynamic rawEntry = raw['entry'] ?? raw['queue'] ?? raw['data'];
-
-    if (rawEntry is List && rawEntry.isNotEmpty) {
-      rawEntry = rawEntry.first;
-    }
-
-    if (rawEntry is! Map) {
-      return {'inQueue': false};
-    }
-
-    final entry = Map<String, dynamic>.from(rawEntry);
-
-    int toInt(dynamic value, {int fallback = 0}) {
-      if (value == null) return fallback;
-      if (value is int) return value;
-      if (value is num) return value.round();
-      return int.tryParse(value.toString()) ?? fallback;
-    }
-
-    final peopleAhead = toInt(
-      raw['peopleAhead'] ?? entry['peopleAhead'],
-      fallback: -1,
-    );
-
-    final position = toInt(
-      raw['position'] ?? entry['position'],
-      fallback: peopleAhead >= 0 ? peopleAhead + 1 : 1,
-    );
-
-    final wait = toInt(
-      raw['estimatedWaitTime'] ??
-          raw['estimatedWaitMinutes'] ??
-          raw['estimatedWait'] ??
-          entry['estimatedWaitTime'] ??
-          entry['estimatedWaitMinutes'] ??
-          entry['estimatedWait'],
-    );
-
-    return <String, dynamic>{
-      ...raw,
-      'inQueue': true,
-      'entry': entry,
-      'position': position,
-      'peopleAhead':
-          peopleAhead >= 0 ? peopleAhead : (position - 1).clamp(0, 999999),
-      'estimatedWaitTime': wait,
-    };
+    await context.read<AppState>().fetchQueueStatus();
+    // _onAppStateChanged (triggered by fetchQueueStatus's notifyListeners)
+    // already calls _syncFromAppState — nothing further to do here.
   }
 
   Map<String, dynamic> _queueEntryToMap(dynamic q) {
@@ -241,13 +132,14 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       '_id': q.id?.toString() ?? '',
       'queueNumber': q.queueNumber?.toString() ?? 'N/A',
       'clinicName': clinic,
-      'clinic': {'name': clinic},
+      'clinic': {'_id': q.clinicId?.toString() ?? '', 'name': clinic},
       'serviceName': q.serviceName?.toString() ?? '',
       'status': _queueStatusString(q.status),
       'position': q.position ?? 1,
       'peopleAhead': q.totalAhead ?? ((q.position ?? 1) - 1),
       'estimatedWaitTime': q.estimatedWait ?? 0,
       'joinedAt': q.joinedAt?.toIso8601String(),
+      'gracePeriodExpiresAt': q.gracePeriodExpiresAt?.toIso8601String(),
     };
   }
 
@@ -276,6 +168,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     final pos = res['position'] as int? ?? 1;
     final status = entry?['status'] as String? ?? '';
     final qNum = entry?['queueNumber']?.toString() ?? '';
+    final entryId = entry?['_id']?.toString() ?? '';
     final prevNoShow = res['prevPatientNoShow'] == true; // server flag
 
     // ── Position approaching (3rd in line) ─────────────────────────────
@@ -300,7 +193,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     if (status == 'called' && !_calledBannerShown) {
       _calledBannerShown = true;
       WidgetsBinding.instance
-          .addPostFrameCallback((_) => _showCalledModal(qNum));
+          .addPostFrameCallback((_) => _showCalledModal(qNum, entryId));
     }
     if (status != 'called') _calledBannerShown = false;
 
@@ -425,7 +318,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     );
   }
 
-  void _showCalledModal(String qNum) {
+  void _showCalledModal(String qNum, String entryId) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
     showDialog(
@@ -468,7 +361,21 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(context);
+              // Tapping this does NOT change the queue status — only staff
+              // (via Start Service, once the patient physically arrives)
+              // can move called -> serving; see markOnTheWay on the server
+              // for why. This just gives staff a heads-up that the patient
+              // acknowledged the call and is on their way, so they're not
+              // finding out only once the patient shows up at the counter.
+              // Best-effort/fire-and-forget: failing silently here is fine
+              // since this is informational, not something the patient
+              // needs to retry or be blocked on.
+              if (entryId.isNotEmpty) {
+                ApiService.markOnTheWay(entryId).catchError((_) {});
+              }
+            },
             child: const Text('Proceeding Now!',
                 style: TextStyle(fontWeight: FontWeight.w800)),
           ),

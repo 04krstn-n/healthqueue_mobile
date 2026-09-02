@@ -4,6 +4,7 @@ import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../state/app_state.dart';
 import '../services/api_service.dart';
+import 'patient_type_request_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -110,6 +111,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         onTap: () {
                           Navigator.pop(context);
                           _showEditPersonal(context, appState);
+                        },
+                      ),
+                      _ActionRow(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Request Account Type Update',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const PatientTypeRequestScreen()),
+                          );
                         },
                       ),
                     ],
