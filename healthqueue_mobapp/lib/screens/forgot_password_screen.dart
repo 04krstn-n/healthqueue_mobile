@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../state/app_state.dart';
+import '../widgets/otp_input_field.dart';
 
 /// Forgot Password flow: phone -> OTP (via Semaphore, same as registration)
 /// -> new password. Matches register_screen.dart's visual style and OTP-step
@@ -370,19 +371,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         ),
       ),
       const SizedBox(height: 18),
-      TextField(
+      OtpInputField(
         controller: _otpCtrl,
-        keyboardType: TextInputType.number,
-        maxLength: 6,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 10),
-        decoration: InputDecoration(
-          counterText: '',
-          hintText: '------',
-          hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 28, letterSpacing: 10),
-          filled: true, fillColor: const Color(0xFFF6F7FB),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-        ),
       ),
       const SizedBox(height: 20),
       SizedBox(

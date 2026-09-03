@@ -174,14 +174,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
               style: TextStyle(fontSize: 12, color: AppColors.textMuted, fontWeight: FontWeight.w500)),
           ],
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Book Appointment',
-            onPressed: _bookNew,
-          ),
-          const SizedBox(width: 8),
-        ],
+        // Book Appointment book-new action already exists as the floating
+        // action button below — this duplicated it in the appbar too.
+        actions: const [],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
           child: TabBar(

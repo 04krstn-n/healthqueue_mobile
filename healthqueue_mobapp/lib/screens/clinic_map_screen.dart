@@ -491,7 +491,16 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
                                 Expanded(child: ElevatedButton(
                                   onPressed: () => Navigator.pushNamed(
                                       context, AppRoutes.joinQueue,
-                                    arguments: _selected?.clinic),
+                                    // Was _selected?.clinic — Clinic has no
+                                    // `.clinic` field at all, so this could
+                                    // never correctly resolve to this card's
+                                    // clinic. `c` is the actual clinic this
+                                    // specific card represents (the loop
+                                    // variable this whole card is built
+                                    // from), which is what should be passed
+                                    // through to Join Queue regardless of
+                                    // whatever `_selected` currently holds.
+                                    arguments: c),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,
                                     foregroundColor: Colors.white,
@@ -614,7 +623,11 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
                             onPressed: () {
                               setState(() => _showCompare = false);
                               Navigator.pushNamed(context, AppRoutes.joinQueue,
-                                arguments: _compareList.isNotEmpty ? _compareList.first.clinic : _selected?.clinic);
+                                // Was `_selected?.clinic` in the fallback —
+                                // same issue as the card button above:
+                                // _selected is already a Clinic, it has no
+                                // `.clinic` field to chain off of.
+                                arguments: _compareList.isNotEmpty ? _compareList.first.clinic : _selected);
                             },
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.primary,
