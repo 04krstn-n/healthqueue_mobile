@@ -269,15 +269,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (mounted) _showOtpStatus(data);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
-      if (msg.toLowerCase().contains('duplicate') ||
-          msg.toLowerCase().contains('already') ||
-          msg.toLowerCase().contains('exist')) {
-        await _showErrorDialog('Account Already Exists',
-            'An account with this email or phone number '
-            'already exists. Please log in instead.');
-      } else {
-        await _showErrorDialog('Registration Failed', msg);
-      }
+      // Show the server's actual message directly — it already contains
+      // the exact wording for a duplicate phone/email (see
+      // authController.register's PHONE_IN_USE_MESSAGE), so there's no
+      // need to re-detect and paraphrase it here.
+      await _showErrorDialog('Registration Failed', msg);
     }
   }
 
@@ -521,12 +517,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           const SizedBox(height: 14),
 
                           _field(
-                            'Email Address', 
+                            'Email Address (Optional)', 
                             _emailCtrl,
                             hint: 'you@email.com',
                             type: TextInputType.emailAddress,
                             icon: Icons.mail_outline,
-                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter your email.' : null,
+                            // Email is optional — patients without one
+                            // (older patients especially) must still be
+                            // able to register with just a phone number.
+                            // Only validate the FORMAT when something was
+                            // actually typed.
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return null;
+                              final email = v.trim();
+                              final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+                              return ok ? null : 'Please enter a valid email address.';
+                            },
                           ),
                           const SizedBox(height: 14),
 

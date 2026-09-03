@@ -31,6 +31,7 @@ class AppState extends ChangeNotifier {
       final data = await ApiService.getMe();
 
       _currentUser = _userFromMap(data);
+      _connectUserSocket(_currentUser!.id);
 
       await Future.wait([
         fetchAppointments(),
@@ -63,6 +64,7 @@ class AppState extends ChangeNotifier {
       _currentUser = _userFromMap(
         data['user'] ?? data,
       );
+      _connectUserSocket(_currentUser!.id);
 
       await Future.wait([
         fetchAppointments(),
@@ -177,6 +179,7 @@ class AppState extends ChangeNotifier {
     try {
       final data = await ApiService.verifyOtp(userId, otp);
       _currentUser = _userFromMap(data['user'] ?? data, fallback: fallback);
+      _connectUserSocket(_currentUser!.id);
 
       await Future.wait([
         fetchAppointments(),
@@ -200,6 +203,57 @@ class AppState extends ChangeNotifier {
 
   Future<Map<String, dynamic>> resendOtp(String userId) =>
       ApiService.resendOtp(userId);
+
+  /* ─────────────────────────────────────────────────────────
+     FORGOT PASSWORD
+  ───────────────────────────────────────────────────────── */
+
+  // Step 1: request an OTP for the given phone number.
+  Future<Map<String, dynamic>> requestPasswordReset(String phone) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      return await ApiService.forgotPassword(phone);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Step 2: verify the OTP, returning the resetToken step 3 needs.
+  Future<Map<String, dynamic>> verifyPasswordResetOtp(
+      String resetId, String otp) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      return await ApiService.verifyResetOtp(resetId, otp);
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // Step 3: set the new password. Does NOT log the user in — they return
+  // to the login screen and sign in with their new password, same as any
+  // other password-reset flow.
+  Future<void> confirmPasswordReset({
+    required String resetId,
+    required String resetToken,
+    required String newPassword,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      await ApiService.resetPassword(
+        resetId: resetId,
+        resetToken: resetToken,
+        newPassword: newPassword,
+      );
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> registerUser({
     required String fullName,
@@ -395,6 +449,7 @@ class AppState extends ChangeNotifier {
     _chatHistoryLoaded = false;
     _pendingCallPopup = null;
     _queueSocket.disconnect();
+    _userSocket.disconnect();
 
     notifyListeners();
   }
@@ -673,6 +728,37 @@ class AppState extends ChangeNotifier {
   // and had to wait for that screen's own periodic poll.
   final QueueSocketService _queueSocket = QueueSocketService();
 
+  // Separate connection joined to this patient's OWN room (`user_<id>`,
+  // not a clinic room — patients aren't clinic-scoped) for account-level
+  // pushes that aren't about any specific queue, e.g. a patient-type
+  // request being approved. Kept alive for the whole logged-in session
+  // (connected on login/restoreSession/registration), unlike _queueSocket
+  // which only connects while there's an active queue.
+  final QueueSocketService _userSocket = QueueSocketService();
+
+  void _connectUserSocket(String userId) {
+    if (userId.isEmpty) return;
+    _userSocket.connect(
+      userId,
+      joinEvent: 'join_user',
+      eventNames: const ['patient_type_updated'],
+      onUpdated: (data) {
+        final newType = (data is Map ? data['patientType'] : null)?.toString();
+        if (newType == null || newType.isEmpty || _currentUser == null) return;
+        // Updates immediately — no logout/login or manual refresh needed,
+        // which was the actual bug: the account changed server-side the
+        // moment staff approved, but nothing ever told this session.
+        _currentUser = _currentUser!.copyWith(patientType: newType);
+        notifyListeners();
+        // If they're also actively waiting in a queue right now, the
+        // server updates that entry's priority in the same request (see
+        // patientTypeRequestController.approveRequest) — pull the fresh
+        // queue status so the Priority tag shows on it immediately too.
+        if (_currentQueue != null) fetchQueueStatus();
+      },
+    );
+  }
+
   // Set the instant the server reports a transition into `called`; cleared
   // by the UI via dismissCallPopup() once it has shown the popup. This is
   // the one-shot signal the global popup (see AppShell) watches for — the
@@ -910,7 +996,7 @@ class AppState extends ChangeNotifier {
       if (clinicIdStr.isNotEmpty) {
         _queueSocket.connect(
           clinicIdStr,
-          onQueueUpdated: (_) => fetchQueueStatus(),
+          onUpdated: (_) => fetchQueueStatus(),
         );
       }
 
@@ -970,7 +1056,7 @@ class AppState extends ChangeNotifier {
     if (result.clinicId.isNotEmpty) {
       _queueSocket.connect(
         result.clinicId,
-        onQueueUpdated: (_) => fetchQueueStatus(),
+        onUpdated: (_) => fetchQueueStatus(),
       );
     }
 

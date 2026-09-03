@@ -32,24 +32,32 @@ class QueueSocketService {
   ];
 
   IO.Socket? _socket;
-  String? _joinedClinicId;
+  String? _joinedId;
 
   bool get isConnected => _socket?.connected ?? false;
 
-  /// Connects (if not already connected to this clinic's room) and calls
-  /// [onQueueUpdated] whenever the server emits any queue-change event.
-  /// Safe to call repeatedly — it no-ops if already joined to [clinicId].
+  /// Connects (if not already connected with this [id]) and calls
+  /// [onUpdated] whenever the server emits a matching event. Safe to call
+  /// repeatedly — it no-ops if already joined with the same [id].
+  ///
+  /// [joinEvent] defaults to 'join_clinic' (queue updates, room
+  /// `clinic_<id>`) — pass 'join_user' to instead join a patient's own
+  /// room (`user_<id>`) for account-level pushes like a patient-type
+  /// approval, which aren't tied to any one clinic. [eventNames] lets
+  /// that second use reuse this same wrapper instead of a duplicate class.
   void connect(
-    String clinicId, {
-    required void Function(dynamic data) onQueueUpdated,
+    String id, {
+    required void Function(dynamic data) onUpdated,
     void Function()? onConnected,
     void Function()? onDisconnected,
+    String joinEvent = 'join_clinic',
+    List<String> eventNames = _queueEventNames,
   }) {
-    if (_socket != null && _joinedClinicId == clinicId && _socket!.connected) {
+    if (_socket != null && _joinedId == id && _socket!.connected) {
       return;
     }
     disconnect();
-    _joinedClinicId = clinicId;
+    _joinedId = id;
 
     // ApiConfig.baseUrl includes a trailing /api for this app's REST calls
     // (see api_config.dart) — Socket.io needs the bare server origin.
@@ -64,14 +72,14 @@ class QueueSocketService {
     );
 
     _socket!.onConnect((_) {
-      _socket!.emit('join_clinic', clinicId);
+      _socket!.emit(joinEvent, id);
       onConnected?.call();
     });
 
     _socket!.onDisconnect((_) => onDisconnected?.call());
 
-    for (final event in _queueEventNames) {
-      _socket!.on(event, onQueueUpdated);
+    for (final event in eventNames) {
+      _socket!.on(event, onUpdated);
     }
 
     _socket!.connect();
@@ -80,6 +88,6 @@ class QueueSocketService {
   void disconnect() {
     _socket?.dispose();
     _socket = null;
-    _joinedClinicId = null;
+    _joinedId = null;
   }
 }

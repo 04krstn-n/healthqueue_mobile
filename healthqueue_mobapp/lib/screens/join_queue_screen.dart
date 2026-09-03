@@ -18,6 +18,17 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
   int _step = 1;
   bool _loading = false;
   bool _didArgs = false;
+  // True only when a clinic arrived pre-selected via route arguments (e.g.
+  // from Find Clinics / the dashboard) — distinct from _clinic being
+  // non-null, which also happens after a normal in-flow selection in step
+  // 1. In the pre-selected case, "Select Clinic" was already done before
+  // this screen even opened, so it shouldn't count as a step here.
+  // _minStep is the lowest _step this flow can ever reach; display
+  // numbering and the back button are both relative to it.
+  bool _clinicPreSelected = false;
+  int get _minStep => _clinicPreSelected ? 2 : 1;
+  int get _totalDisplaySteps => 3 - _minStep + 1;
+  int get _displayStep => _step - _minStep + 1;
 
   List<Clinic> _clinics = [];
   Clinic? _clinic;
@@ -55,6 +66,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
     if (args is Clinic) {
       _clinic = args;
       _step = 2;
+      _clinicPreSelected = true;
     }
 
     // ------------------------------------------------------------
@@ -166,7 +178,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
   void _back() {
     if (_loading) return;
 
-    if (_step == 1) {
+    if (_step <= _minStep) {
       Navigator.pop(context);
     } else {
       setState(() => _step--);
@@ -911,7 +923,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
           onPressed: _loading ? null : _back,
         ),
         title: Text(
-          'Join Queue — Step $_step of 3',
+          'Join Queue — Step $_displayStep of $_totalDisplaySteps',
           style: const TextStyle(
             fontWeight: FontWeight.w800,
             fontSize: 15,
@@ -949,16 +961,16 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
                   ),
                   child: Row(
                     children: List.generate(
-                      3,
+                      _totalDisplaySteps,
                       (i) => Expanded(
                         child: Container(
                           height: 4,
                           margin: EdgeInsets.only(
-                            right: i < 2 ? 6 : 0,
+                            right: i < _totalDisplaySteps - 1 ? 6 : 0,
                           ),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(99),
-                            color: i < _step
+                            color: i < _displayStep
                                 ? AppColors.primary
                                 : Colors.grey.shade200,
                           ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../screens/appointments_screen.dart';
 import '../../screens/login_screen.dart';
 import '../../screens/register_screen.dart';
+import '../../screens/forgot_password_screen.dart';
 import '../../screens/queue_monitoring_screen.dart';
 import '../../screens/join_queue_screen.dart';
 import '../../screens/chatbot_screen.dart';
@@ -16,6 +17,7 @@ class AppRoutes {
   static const splash          = '/';
   static const login           = '/login';
   static const register        = '/register';
+  static const forgotPassword  = '/forgot-password';
   static const shell           = '/shell';
   static const dashboard       = '/shell';   // alias kept for compat
   static const queueMonitoring = '/queue';
@@ -31,6 +33,7 @@ class AppRoutes {
     splash:          (_) => const SplashScreen(),
     login:           (_) => const LoginScreen(),
     register:        (_) => const RegisterScreen(),
+    forgotPassword:  (_) => const ForgotPasswordScreen(),
     shell:           (_) => const AppShell(),
     // Full-screen routes pushed on top of shell
     joinQueue:       (_) => const JoinQueueScreen(),

@@ -114,12 +114,19 @@ class ApiService {
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
+  // `identifier` can be either an email or a phone number — the server
+  // auto-detects which based on whether it contains '@' (see
+  // authController.login). This used to always send the value under the
+  // 'email' JSON key regardless of which the user actually typed, so
+  // selecting "Phone" in the login screen's toggle and entering a phone
+  // number silently failed every time (the server was searching by email
+  // for a value that was never stored there).
   static Future<Map<String, dynamic>> login(
-      String email, String password) async {
+      String identifier, String password) async {
     final res = await _once(() => http.post(
           Uri.parse('$baseUrl/auth/login'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'email': email, 'password': password}),
+          body: jsonEncode({'identifier': identifier, 'password': password}),
         ));
 
     if (res.statusCode == 403) {
@@ -181,6 +188,51 @@ class ApiService {
           body: jsonEncode({'userId': userId}),
         ));
     _assertOk(res, 'Failed to resend OTP.');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ── Forgot Password ──────────────────────────────────────────────────────
+  // Step 1: request an OTP be sent to a registered phone number.
+  static Future<Map<String, dynamic>> forgotPassword(String phone) async {
+    final res = await _once(() => http.post(
+          Uri.parse('$baseUrl/auth/forgot-password'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'phone': phone}),
+        ));
+    _assertOk(res, 'Failed to send reset code.');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // Step 2: verify the OTP. Returns a resetToken (short-lived) that
+  // authorizes the actual password change in step 3 — the OTP itself is
+  // consumed the moment this succeeds and can't be reused.
+  static Future<Map<String, dynamic>> verifyResetOtp(
+      String resetId, String otp) async {
+    final res = await _once(() => http.post(
+          Uri.parse('$baseUrl/auth/verify-reset-otp'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'resetId': resetId, 'otp': otp}),
+        ));
+    _assertOk(res, 'Verification failed.');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // Step 3: set the new password using the resetToken from step 2.
+  static Future<Map<String, dynamic>> resetPassword({
+    required String resetId,
+    required String resetToken,
+    required String newPassword,
+  }) async {
+    final res = await _once(() => http.post(
+          Uri.parse('$baseUrl/auth/reset-password'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'resetId': resetId,
+            'resetToken': resetToken,
+            'newPassword': newPassword,
+          }),
+        ));
+    _assertOk(res, 'Failed to reset password.');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
@@ -665,13 +717,29 @@ class ApiService {
 
   // ── Chatbot ───────────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>> sendChatMessage(String message) async {
-    final res = await _once(() async => http.post(
-          Uri.parse('$baseUrl/chatbot/message'),
-          headers: await _authHeaders(),
-          body: jsonEncode({'message': message}),
-        ));
-    _assertOk(res, 'Chatbot error');
-    return jsonDecode(res.body) as Map<String, dynamic>;
+    // Uses its own longer timeout rather than the shared _mutateTimeout
+    // (20s) — the server itself now waits up to 20s for a cold-starting
+    // Rasa instance to respond (see chatbotController.handleMessage), so
+    // reusing the same 20s here would let the client give up right as the
+    // server was about to succeed. This only affects sendChatMessage, not
+    // other actions like joining a queue or booking an appointment.
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/chatbot/message'),
+            headers: await _authHeaders(),
+            body: jsonEncode({'message': message}),
+          )
+          .timeout(const Duration(seconds: 30));
+      _assertOk(res, 'Chatbot error');
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } on TimeoutException {
+      throw Exception(
+        'The chatbot is taking longer than usual to respond. Please try again.',
+      );
+    } on SocketException {
+      throw Exception('No internet connection. Please check your network.');
+    }
   }
 
   // GET /chatbot/history — the patient's own conversation history for the
