@@ -2,7 +2,8 @@
 class ChatMessage {
   final String        id;
   final String        text;           // message content
-  final bool          isUser;         // true = patient, false = bot
+  final bool          isUser;         // true = patient, false = bot/staff
+  final bool          isStaff;        // true = authored by a staff member (only meaningful when isUser is false)
   final DateTime      timestamp;
   final List<String>  quickReplies;
 
@@ -11,6 +12,7 @@ class ChatMessage {
     required this.text,
     required this.isUser,
     required this.timestamp,
+    this.isStaff = false,
     this.quickReplies = const [],
   }) : id = id ?? '';
 }

@@ -741,9 +741,38 @@ class AppState extends ChangeNotifier {
     _userSocket.connect(
       userId,
       joinEvent: 'join_user',
-      eventNames: const ['patient_type_updated'],
+      eventNames: const [
+        'patient_type_updated',
+        'staff_chat_reply',
+        'chat_thread_closed',
+      ],
       onUpdated: (data) {
-        final newType = (data is Map ? data['patientType'] : null)?.toString();
+        if (data is! Map) return;
+
+        // A staff member replied in the live chat thread — push it
+        // straight into the chat feed, same as a bot reply arriving.
+        if (data.containsKey('text') && data.containsKey('staffName')) {
+          _awaitingStaff = false;
+          addStaffText(
+            data['text']?.toString() ?? '',
+            staffName: data['staffName']?.toString(),
+          );
+          return;
+        }
+
+        // Staff resolved the escalation — hand the conversation back to
+        // the bot in this session too, so the next message the patient
+        // sends goes through the assistant again instead of staying
+        // stuck waiting.
+        if (data.containsKey('note') && !data.containsKey('patientType')) {
+          _awaitingStaff = false;
+          addBotText(
+            "You're all set — this conversation is back with me. Let me know if there's anything else I can help with!",
+          );
+          return;
+        }
+
+        final newType = (data['patientType'])?.toString();
         if (newType == null || newType.isEmpty || _currentUser == null) return;
         // Updates immediately — no logout/login or manual refresh needed,
         // which was the actual bug: the account changed server-side the
@@ -1124,6 +1153,33 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Staff replies render in the same feed as bot replies (isUser: false)
+  // but flagged isStaff so the chat screen can show a "Staff" badge/avatar
+  // instead of the assistant one — the person on the other end has changed
+  // even though the bubble side hasn't.
+  void addStaffText(String text, {String? staffName}) {
+    _chatMessages.add(
+      ChatMessage(
+        text: text,
+        isUser: false,
+        isStaff: true,
+        timestamp: DateTime.now(),
+      ),
+    );
+    notifyListeners();
+  }
+
+  // Whether this patient's conversation is currently being handled by a
+  // staff member (server-side ChatSession in 'staff' mode) rather than the
+  // bot. Drives the "waiting for staff" indicator and suppresses the
+  // "I'm not sure about that" fallback text after an escalated message.
+  bool _awaitingStaff = false;
+  bool get awaitingStaff => _awaitingStaff;
+  void setAwaitingStaff(bool v) {
+    _awaitingStaff = v;
+    notifyListeners();
+  }
+
   void addUserText(
     String text,
   ) {
@@ -1190,11 +1246,18 @@ class AppState extends ChangeNotifier {
             DateTime.now();
         final userMsg = m['message']?.toString() ?? '';
         final botReply = m['reply']?.toString() ?? '';
+        final fromStaff = m['sender']?.toString() == 'staff' ||
+            m['source']?.toString() == 'staff';
         if (userMsg.isNotEmpty) {
           restored.add(ChatMessage(text: userMsg, isUser: true, timestamp: ts));
         }
         if (botReply.isNotEmpty) {
-          restored.add(ChatMessage(text: botReply, isUser: false, timestamp: ts));
+          restored.add(ChatMessage(
+            text: botReply,
+            isUser: false,
+            isStaff: fromStaff,
+            timestamp: ts,
+          ));
         }
       }
       if (restored.isNotEmpty) {

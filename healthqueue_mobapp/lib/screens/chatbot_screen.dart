@@ -357,12 +357,21 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     try {
       final res = await ApiService.sendChatMessage(msg);
 
-      // Server returns { response, reply, source, isEscalated, logId }
+      // Server returns { response, reply, source, isEscalated, logId } —
+      // or, once a conversation has been escalated and staff have taken
+      // over, { response: null, awaitingStaff: true } instead of a bot
+      // reply (see chatbotController.handleMessage's staff-handoff check).
       final reply = (res['response'] ?? res['reply'] ?? res['answer'] ?? '')
           .toString().trim();
       _lastLogId = res['logId']?.toString();
 
-      if (reply.isEmpty) {
+      if (res['awaitingStaff'] == true) {
+        appState.setAwaitingStaff(true);
+        // No canned bot text here — the message was relayed to staff, not
+        // answered. A separate "Staff notified" / typing-style indicator
+        // in the UI communicates this; showing a bot reply would look
+        // like the assistant is still driving the conversation.
+      } else if (reply.isEmpty) {
         // Server returned empty — shouldn't happen with the new controller
         appState.addBotText(
           "I'm not sure about that. Try asking about wait times, appointments, or finding a clinic.",
@@ -675,9 +684,13 @@ class _MessageBubble extends StatelessWidget {
           if (!isUser) ...[
             Container(
               width: 28, height: 28,
-              decoration: const BoxDecoration(
-                  color: Color(0xFF2563EB), shape: BoxShape.circle),
-              child: const Icon(Icons.smart_toy_outlined,
+              decoration: BoxDecoration(
+                  color: msg.isStaff
+                      ? const Color(0xFF16A34A)
+                      : const Color(0xFF2563EB),
+                  shape: BoxShape.circle),
+              child: Icon(
+                  msg.isStaff ? Icons.support_agent : Icons.smart_toy_outlined,
                   size: 16, color: Colors.white),
             ),
             const SizedBox(width: 8),
