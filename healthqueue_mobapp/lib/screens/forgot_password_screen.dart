@@ -74,6 +74,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       _otpExpiry == null ? 0
       : _otpExpiry!.difference(DateTime.now()).inSeconds.clamp(0, _otpValidSeconds);
 
+  // Same reasoning as register_screen.dart's identical helper — a
+  // standard M:SS countdown reads far more naturally than raw seconds.
+  String _formatCountdown(int totalSeconds) {
+    final m = totalSeconds ~/ 60;
+    final s = totalSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _showErrorDialog(String title, String msg) async {
     if (!mounted) return;
     await showDialog(
@@ -355,7 +363,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.5)),
       const SizedBox(height: 20),
       Text(
-        _otpExpired ? 'Code has expired' : 'Expires in ${left}s',
+        _otpExpired ? 'Code has expired' : 'Expires in ${_formatCountdown(left)}',
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
           color: _otpExpired ? Colors.red
               : left < 30 ? Colors.orange : Colors.green),

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../services/api_service.dart';
 import '../services/queue_socket_service.dart';
+import '../services/push_notification_service.dart';
 import '../models/appointment_models.dart';
 import '../models/queue_models.dart';
 import '../models/chat_models.dart';
@@ -32,6 +33,7 @@ class AppState extends ChangeNotifier {
 
       _currentUser = _userFromMap(data);
       _connectUserSocket(_currentUser!.id);
+      PushNotificationService.registerToken();
 
       await Future.wait([
         fetchAppointments(),
@@ -65,6 +67,7 @@ class AppState extends ChangeNotifier {
         data['user'] ?? data,
       );
       _connectUserSocket(_currentUser!.id);
+      PushNotificationService.registerToken();
 
       await Future.wait([
         fetchAppointments(),
@@ -180,6 +183,7 @@ class AppState extends ChangeNotifier {
       final data = await ApiService.verifyOtp(userId, otp);
       _currentUser = _userFromMap(data['user'] ?? data, fallback: fallback);
       _connectUserSocket(_currentUser!.id);
+      PushNotificationService.registerToken();
 
       await Future.wait([
         fetchAppointments(),
@@ -337,6 +341,12 @@ class AppState extends ChangeNotifier {
       existing?.hmoNumber,
     ]);
 
+    final address = _firstNonEmpty([
+      m['address'],
+      f['address'],
+      existing?.address,
+    ]);
+
     /* ---------------- DOB ---------------- */
 
     final serverDob = _parseDob(
@@ -380,6 +390,7 @@ class AppState extends ChangeNotifier {
       age: finalAge,
       philHealthNumber: philHealthNumber,
       hmoNumber: hmoNumber,
+      address: address,
     );
   }
 
@@ -450,6 +461,7 @@ class AppState extends ChangeNotifier {
     _pendingCallPopup = null;
     _queueSocket.disconnect();
     _userSocket.disconnect();
+    PushNotificationService.clearToken();
 
     notifyListeners();
   }
@@ -483,6 +495,8 @@ class AppState extends ChangeNotifier {
 
         'hmoNumber': data['hmoNumber'] ?? oldUser?.hmoNumber ?? '',
 
+        'address': data['address'] ?? oldUser?.address ?? '',
+
         'age': data['age'] ?? oldUser?.age ?? '',
 
         'dateOfBirth': data['dateOfBirth'] ??
@@ -515,6 +529,7 @@ class AppState extends ChangeNotifier {
     String? patientType,
     String? philHealthNumber,
     String? hmoNumber,
+    String? address,
   }) async {
     if (_currentUser == null) {
       throw Exception('No logged-in user.');
@@ -532,6 +547,7 @@ class AppState extends ChangeNotifier {
         if (patientType != null) 'patientType': patientType,
         if (philHealthNumber != null) 'philHealthNumber': philHealthNumber,
         if (hmoNumber != null) 'hmoNumber': hmoNumber,
+        if (address != null) 'address': address,
       };
 
       debugPrint('PROFILE UPDATE BODY: $body');
@@ -553,6 +569,7 @@ class AppState extends ChangeNotifier {
         'philHealthNumber':
             updatedUser['philHealthNumber'] ?? oldUser.philHealthNumber,
         'hmoNumber': updatedUser['hmoNumber'] ?? oldUser.hmoNumber,
+        'address': updatedUser['address'] ?? oldUser.address,
         'age': updatedUser['age'] ?? oldUser.age,
         'dateOfBirth': updatedUser['dateOfBirth'] ??
             updatedUser['dob'] ??
@@ -668,6 +685,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
 
     fetchAppointments();
+  }
+
+  // Dedicated cancel path (rather than routing through the generic
+  // updateAppointment above) — that generic version updated local state
+  // to "cancelled" immediately and only fired the API call afterward
+  // with its error silently swallowed (.catchError((_) => false)), so a
+  // failed cancellation (already cancelled, too close to the appointment
+  // time, network error) left the UI confidently showing "cancelled"
+  // with no way for the screen to know it hadn't actually happened
+  // server-side, and nothing was ever shown to the user either way.
+  // This calls the server first and only updates local state on
+  // confirmed success, returning the result so the screen can show a
+  // real success/error message — matching how cancelQueue already works.
+  Future<bool> cancelAppointment(String id) async {
+    final ok = await ApiService.cancelAppointment(id);
+    if (ok) {
+      final idx = _appointments.indexWhere((a) => a.id == id);
+      if (idx != -1) {
+        _appointments[idx] =
+            _appointments[idx].copyWith(status: AppointmentStatus.cancelled);
+        notifyListeners();
+      }
+      fetchAppointments();
+    }
+    return ok;
   }
 
   void updateAppointment(

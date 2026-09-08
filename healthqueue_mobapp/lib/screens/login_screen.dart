@@ -17,10 +17,36 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isEmail    = true;
   bool _showPass   = false;
   bool _isLoading  = false;
+  bool _didCheckArgs = false;
 
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didCheckArgs) return;
+    _didCheckArgs = true;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map && args['justLoggedOut'] == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('You have been logged out successfully.'),
+          backgroundColor: Color(0xFF16A34A),
+        ));
+      });
+    } else if (args is Map && args['accountDeactivated'] == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Your account has been deactivated. Contact support to reactivate.'),
+          backgroundColor: Colors.red,
+        ));
+      });
+    }
+  }
 
   @override
   void dispose() {

@@ -13,6 +13,7 @@ class AppUser {
   final String age;
   final String philHealthNumber;
   final String hmoNumber;
+  final String address;
 
   const AppUser({
     required this.id,
@@ -27,6 +28,7 @@ class AppUser {
     required this.age,
     required this.philHealthNumber,
     required this.hmoNumber,
+    this.address = '',
   });
 
   AppUser copyWith({
@@ -41,6 +43,7 @@ class AppUser {
     String? age,
     String? philHealthNumber,
     String? hmoNumber,
+    String? address,
   }) {
     return AppUser(
       id: id,
@@ -55,6 +58,7 @@ class AppUser {
       age: age ?? this.age,
       philHealthNumber: philHealthNumber ?? this.philHealthNumber,
       hmoNumber: hmoNumber ?? this.hmoNumber,
+      address: address ?? this.address,
     );
   }
 }

@@ -34,9 +34,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
         : (p.first[0] + p.last[0]).toUpperCase();
   }
 
-  void _logout() {
-    context.read<AppState>().logout();
-    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (_) => false);
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Log Out?',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+        content: const Text(
+          'Are you sure you want to log out of your account?',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    await context.read<AppState>().logout();
+    if (!mounted) return;
+    // Shown via the login route's own arguments rather than a SnackBar on
+    // this screen — this screen's Scaffold is removed by
+    // pushNamedAndRemoveUntil, so a SnackBar attached to it would never
+    // actually get to display.
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      AppRoutes.login,
+      (_) => false,
+      arguments: {'justLoggedOut': true},
+    );
   }
 
   @override
@@ -210,6 +249,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     value: user.email.isNotEmpty ? user.email : '—',
                   ),
                   _InfoRow(
+                    label: 'Complete Address',
+                    value: user.address.isNotEmpty ? user.address : '—',
+                  ),
+                  _InfoRow(
                     label: 'Age',
                     value: user.age,
                   ),
@@ -304,6 +347,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final nameCtrl = TextEditingController(text: u.fullName);
     final phoneCtrl = TextEditingController(text: u.phone);
     final ageCtrl = TextEditingController(text: u.age);
+    final addressCtrl = TextEditingController(text: u.address);
     final dobCtrl = TextEditingController(
       text: u.dob.year > 1900
           ? '${u.dob.year.toString().padLeft(4, '0')}-${u.dob.month.toString().padLeft(2, '0')}-${u.dob.day.toString().padLeft(2, '0')}'
@@ -385,6 +429,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 14),
+              _Field(
+                  ctrl: addressCtrl,
+                  label: 'Complete Address',
+                  icon: Icons.home_outlined,
+                  maxLines: 2),
+              const SizedBox(height: 14),
               SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -406,6 +456,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 age: ageCtrl.text.trim(),
                                 gender: gender,
                                 dob: selectedDob,
+                                address: addressCtrl.text.trim(),
                               );
                               if (ctx.mounted) Navigator.pop(sheetCtx);
                               _snack(ctx, 'Personal info updated!');
@@ -600,7 +651,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _confirmDeactivate(BuildContext ctx) {
     showDialog(
       context: ctx,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Deactivate Account',
             style: TextStyle(fontWeight: FontWeight.w800, color: Colors.red)),
         content: const Text(
@@ -608,13 +659,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
-              Navigator.pop(ctx);
-              _logout();
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              // Previously this just called _logout() directly — the
+              // account was never actually deactivated server-side, only
+              // logged out locally, which falsely looked like it worked.
+              final success = await ApiService.deactivateAccount();
+              if (!mounted) return;
+              if (!success) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Could not deactivate your account. Please try again.'),
+                  backgroundColor: Colors.red,
+                ));
+                return;
+              }
+              await context.read<AppState>().logout();
+              if (!mounted) return;
+              Navigator.pushNamedAndRemoveUntil(
+                context,
+                AppRoutes.login,
+                (_) => false,
+                arguments: {'accountDeactivated': true},
+              );
             },
             child: const Text('Deactivate'),
           ),
@@ -675,12 +746,14 @@ class _Field extends StatelessWidget {
   final IconData icon;
   final TextInputType? type;
   final bool obscure;
+  final int maxLines;
   const _Field(
       {required this.ctrl,
       required this.label,
       required this.icon,
       this.type,
-      this.obscure = false});
+      this.obscure = false,
+      this.maxLines = 1});
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
@@ -688,6 +761,7 @@ class _Field extends StatelessWidget {
           controller: ctrl,
           keyboardType: type,
           obscureText: obscure,
+          maxLines: obscure ? 1 : maxLines,
           decoration: InputDecoration(
             labelText: label,
             prefixIcon: Icon(icon, color: AppColors.primary, size: 20),

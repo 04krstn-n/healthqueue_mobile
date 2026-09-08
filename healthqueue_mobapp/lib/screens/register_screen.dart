@@ -165,6 +165,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _otpExpiry == null ? 0
       : _otpExpiry!.difference(DateTime.now()).inSeconds.clamp(0, _otpValidSeconds);
 
+  // "Expires in 245s" was genuinely hard to read at a glance — a
+  // standard M:SS countdown (matching how OTP timers look in basically
+  // every other app) is much clearer than a raw seconds count.
+  String _formatCountdown(int totalSeconds) {
+    final m = totalSeconds ~/ 60;
+    final s = totalSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
   // Local, UX-only guards before we bother the server. The actual code check
   // happens server-side in AppState.completeRegistration.
   bool _canAttemptOtp() {
@@ -346,7 +355,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 _otpExpired ? 'OTP has expired'
-                    : 'Expires in ${left}s',
+                    : 'Expires in ${_formatCountdown(left)}',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
                   color: _otpExpired ? Colors.red
                       : left < 30 ? Colors.orange : Colors.green),

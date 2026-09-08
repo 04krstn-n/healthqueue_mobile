@@ -148,7 +148,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       ),
     );
     if (ok != true || !mounted) return;
-    context.read<AppState>().updateAppointment(id, status: apt.AppointmentStatus.cancelled);
+
+    final success = await context.read<AppState>().cancelAppointment(id);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(success
+          ? 'Your appointment has been cancelled successfully.'
+          : 'Could not cancel the appointment. Please try again.'),
+      backgroundColor: success ? const Color(0xFF16A34A) : Colors.red,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override

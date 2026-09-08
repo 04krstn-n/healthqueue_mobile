@@ -790,6 +790,28 @@ class ApiService {
   }
 
   // ── Notifications ─────────────────────────────────────────────────────────
+  // Registers/clears this device's push token — pass '' to clear (see
+  // PushNotificationService.clearToken, used on logout).
+  static Future<bool> registerFcmToken(String fcmToken) async {
+    final res = await _withRetry(() async => http.put(
+          Uri.parse('$baseUrl/users/me/fcm-token'),
+          headers: await _authHeaders(),
+          body: jsonEncode({'fcmToken': fcmToken}),
+        ));
+    return res.statusCode >= 200 && res.statusCode < 300;
+  }
+
+  // Actually deactivates the account server-side — previously the app's
+  // "Deactivate Account" confirmation only ever called local logout(),
+  // never reaching the server at all, so the account stayed fully active.
+  static Future<bool> deactivateAccount() async {
+    final res = await _once(() async => http.put(
+          Uri.parse('$baseUrl/users/me/deactivate'),
+          headers: await _authHeaders(),
+        ));
+    return res.statusCode >= 200 && res.statusCode < 300;
+  }
+
   static Future<List<dynamic>> getNotifications() async {
     try {
       final res = await _withRetry(() async => http.get(
