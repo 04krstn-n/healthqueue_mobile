@@ -60,6 +60,10 @@ class _AiInsightsScreenState extends State<AiInsightsScreen>
         }
       } catch (_) {}
 
+      // Location permission requests above can take a while (or the user
+      // can navigate away entirely during them) — guard before touching
+      // context again.
+      if (!mounted) return;
       final appState = context.read<AppState>();
       final patientType = appState.currentUser?.patientType ?? 'Regular';
 

@@ -288,7 +288,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             fontWeight: FontWeight.w900)),
                     const SizedBox(height: 32),
                   ],
-                  Container(
+                  RepaintBoundary(
+                    // Same fix as login_screen.dart: isolates the shadowed
+                    // card's expensive blur from repainting every frame of
+                    // the keyboard's open/close animation.
+                    child: Container(
                     padding: const EdgeInsets.all(24),
                     width: double.infinity,
                     decoration: BoxDecoration(
@@ -303,6 +307,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       2 => _newPasswordStep(),
                       _ => _doneStep(),
                     },
+                  ),
                   ),
                   const SizedBox(height: 16),
                   if (_step != 3)

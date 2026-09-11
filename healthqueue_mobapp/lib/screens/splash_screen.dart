@@ -55,7 +55,12 @@ class _SplashScreenState extends State<SplashScreen> {
                   color: Colors.white,
                   shape: BoxShape.circle,
                 ),
-                child: Image.asset('assets/icon/healthqueue_logo.png'),
+                child: Image.asset(
+                  'assets/icon/healthqueue_logo.png',
+                  // See login_screen.dart's cacheWidth comment — same
+                  // reasoning, sized for this screen's 72x72 display box.
+                  cacheWidth: 220,
+                ),
               ),
               const SizedBox(height: 18),
               const Text(

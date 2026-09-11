@@ -26,7 +26,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // Global key to manage the Form state and trigger layout validation messages
   final _formKey = GlobalKey<FormState>();
 
-  final bool _isEmailMode    = true; // kept for existing UI compatibility
   bool _showPassword   = false;
   bool _showConfirm    = false;
   bool _agreed         = false;
@@ -443,6 +442,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: Image.asset(
                           'assets/icon/healthqueue_logo.png',
                           fit: BoxFit.contain,
+                          // Same fix as login_screen.dart/splash_screen.dart
+                          // — decode at display size, not full native res.
+                          cacheWidth: 150,
                         ),
                       ),
                     ),
@@ -463,7 +465,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 32),
 
-                    Container(
+                    RepaintBoundary(
+                      // Same fix as login_screen.dart: without this, the
+                      // BoxShadow's blur gets redone every frame of the
+                      // keyboard's open/close animation even though this
+                      // card's own content isn't changing.
+                      child: Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -684,6 +691,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ],
                       ),
                     ),
+                    ), // closes RepaintBoundary wrapping the card above
                   ]),
                 ),
               ),
@@ -771,7 +779,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _label('Gender'),
       const SizedBox(height: 6),
       DropdownButtonFormField<String>(
-        value: _gender,
+        // 'value' is deprecated in favor of 'initialValue' — safe swap
+        // here since _gender is only ever set via this dropdown's own
+        // onChanged, never reset from elsewhere.
+        initialValue: _gender,
         isExpanded: true,
         validator: (v) => (v == null || v.isEmpty) ? 'Please select your gender.' : null,
         decoration: _inputDeco(hint: 'Select gender', icon: Icons.wc_outlined),

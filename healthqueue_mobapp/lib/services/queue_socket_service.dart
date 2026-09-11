@@ -68,6 +68,19 @@ class QueueSocketService {
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
+          // socket_io_client's default is to retry a failed/dropped
+          // connection FOREVER (roughly every 1-5s, no cap). If the
+          // server is ever unreachable for the whole session (wrong
+          // network, server down, bad .env URL — easy to hit during
+          // testing), that's a steady, invisible background tick of
+          // connection attempts running the entire time the patient has
+          // the app open, on top of whatever else is happening. The app
+          // already has a 15s REST poll as a fallback path for queue
+          // status, so the socket failing to connect should degrade
+          // gracefully, not retry endlessly.
+          .setReconnectionAttempts(5)
+          .setReconnectionDelay(2000)
+          .setReconnectionDelayMax(10000)
           .build(),
     );
 

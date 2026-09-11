@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../state/app_state.dart';
+import '../models/user_models.dart';
 import '../services/api_service.dart';
 import 'patient_type_request_screen.dart';
 
@@ -80,8 +81,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
-    final user = appState.currentUser;
+    // select(), not watch() — this screen only cares about currentUser.
+    // Previously watch<AppState>() rebuilt this entire screen on every
+    // AppState change (queue pings, chat messages, appointment polls...),
+    // even though none of that affects what Profile displays, and even
+    // while this tab wasn't the one on screen (IndexedStack keeps it
+    // mounted). currentUser is a stable reference until reassigned, so
+    // select() now only rebuilds on an actual login/logout/profile update.
+    final user = context.select<AppState, AppUser?>((s) => s.currentUser);
 
     if (user == null) {
       return Scaffold(
@@ -149,7 +156,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         label: 'Edit Personal Information',
                         onTap: () {
                           Navigator.pop(context);
-                          _showEditPersonal(context, appState);
+                          // .read(), not the watched/selected value above —
+                          // this is a one-off action call, not something
+                          // that should cause this screen to rebuild.
+                          _showEditPersonal(context, context.read<AppState>());
                         },
                       ),
                       _ActionRow(
@@ -381,7 +391,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: Icons.cake_outlined,
                   type: TextInputType.number),
               DropdownButtonFormField<String>(
-                value: gender.isEmpty ? null : gender,
+                // 'value' deprecated -> 'initialValue' — safe here,
+                // `gender` is a local set once from u.gender and only
+                // ever changed by this dropdown's own onChanged.
+                initialValue: gender.isEmpty ? null : gender,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Gender',
@@ -458,12 +471,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 dob: selectedDob,
                                 address: addressCtrl.text.trim(),
                               );
-                              if (ctx.mounted) Navigator.pop(sheetCtx);
+                              // Guard against the screen having been
+                              // navigated away from during the await above
+                              // — using ctx/sheetCtx/setSt after that would
+                              // throw. This also fixes the previous
+                              // mismatch of checking ctx.mounted but then
+                              // using sheetCtx for the actual pop.
+                              if (!mounted) return;
+                              Navigator.pop(sheetCtx);
                               _snack(ctx, 'Personal info updated!');
                             } catch (e) {
-                              _snack(ctx, 'Error: $e', error: true);
+                              if (mounted) {
+                                _snack(ctx, 'Error: $e', error: true);
+                              }
                             } finally {
-                              setSt(() => saving = false);
+                              if (mounted) setSt(() => saving = false);
                             }
                           },
                     child: saving
@@ -623,13 +645,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           try {
                             await ApiService.updatePassword(
                                 currentPassword: cur, newPassword: nw);
-                            if (ctx.mounted) Navigator.pop(sheetCtx);
+                            // Same guard as the edit-personal-info save
+                            // above — avoid using ctx/sheetCtx/setSt after
+                            // an await if the screen's gone.
+                            if (!mounted) return;
+                            Navigator.pop(sheetCtx);
                             _snack(ctx, 'Password changed successfully!');
                           } catch (e) {
-                            setSt(() => error =
-                                e.toString().replaceAll('Exception: ', ''));
+                            if (mounted) {
+                              setSt(() => error =
+                                  e.toString().replaceAll('Exception: ', ''));
+                            }
                           } finally {
-                            setSt(() => saving = false);
+                            if (mounted) setSt(() => saving = false);
                           }
                         },
                   child: saving
@@ -824,7 +852,13 @@ class _SectionCard extends StatelessWidget {
       required this.onEdit,
       required this.children});
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => RepaintBoundary(
+        // Multiple _SectionCard instances sit on this screen; without
+        // this, any one of them changing (e.g. after an edit) would
+        // otherwise sit alongside the others just fine since Profile
+        // rebuilds rarely — but this keeps it consistent with the same
+        // fix applied everywhere else a shadowed card exists.
+        child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -862,6 +896,7 @@ class _SectionCard extends StatelessWidget {
             child: Column(children: children),
           ),
         ]),
+      ),
       );
 }
 
@@ -917,53 +952,6 @@ class _ActionRow extends StatelessWidget {
           Icon(Icons.chevron_right_rounded,
               color: c.withValues(alpha: 0.5), size: 18),
         ]),
-      ),
-    );
-  }
-}
-
-class _MiniInfoCard extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _MiniInfoCard({
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(
-        vertical: 14,
-        horizontal: 16,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .15),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withValues(
-                alpha: .8,
-              ),
-              fontSize: 12,
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -52,7 +52,22 @@ class _PatientTypeRequestScreenState extends State<PatientTypeRequestScreen> {
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 85);
+    // maxWidth/maxHeight downscale the actual picked file itself — this
+    // matters far more than it might seem: a modern phone camera photo
+    // can be 4000x3000px+ even at reduced JPEG quality (imageQuality only
+    // affects compression, not pixel dimensions), and that full-resolution
+    // bitmap gets decoded into memory in full the moment it's displayed,
+    // even though this screen only ever shows it at 180 logical pixels
+    // tall. 1600px on the long edge is comfortably more than needed for
+    // a staff member reviewing an ID photo, while cutting the decoded
+    // memory footprint by roughly 80-90% compared to an uncapped camera
+    // shot.
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+      maxWidth: 1600,
+      maxHeight: 1600,
+    );
     if (picked != null && mounted) {
       setState(() => _photo = File(picked.path));
     }
@@ -167,7 +182,10 @@ class _PatientTypeRequestScreenState extends State<PatientTypeRequestScreen> {
   }
 
   Widget _form() {
-    return Container(
+    return RepaintBoundary(
+      // Consistent with the same fix applied to every other shadowed
+      // form card in the app.
+      child: Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -211,7 +229,16 @@ class _PatientTypeRequestScreenState extends State<PatientTypeRequestScreen> {
         if (_photo != null)
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.file(_photo!, height: 180, width: double.infinity, fit: BoxFit.cover),
+            child: Image.file(
+              _photo!,
+              height: 180,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              // Belt-and-suspenders alongside the maxWidth/maxHeight cap
+              // in _pickPhoto above — decodes at display size regardless
+              // of what the source file actually turns out to be.
+              cacheHeight: 360,
+            ),
           ),
         const SizedBox(height: 10),
         Row(children: [
@@ -254,6 +281,7 @@ class _PatientTypeRequestScreenState extends State<PatientTypeRequestScreen> {
           ),
         ),
       ]),
+    ),
     );
   }
 }

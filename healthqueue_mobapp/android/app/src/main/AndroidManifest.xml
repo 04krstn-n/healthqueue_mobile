@@ -17,6 +17,17 @@
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
 
+        <!-- REMOVED: io.flutter.embedding.android.EnableImpeller=false.
+             This was added earlier while testing whether Impeller was
+             causing jank. It wasn't the cause (disabling it didn't move
+             FPS) — but it was left in, meaning every test since then ran
+             on the OLDER Skia renderer instead of Impeller (Flutter's
+             modern, actively-recommended default, specifically built to
+             reduce the kind of rendering jank this app has been fighting).
+             The engine log's "[Action Required]: Impeller opt-out
+             deprecated" warning confirmed this override was still active.
+             Removing it lets the app use Impeller (the default) again. -->
+
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDjwhS1GnMYcdz0-wYhY5JzWX_nN2DFtPk" />

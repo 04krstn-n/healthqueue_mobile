@@ -46,17 +46,30 @@ class PushNotificationService {
 
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    // Everything below here was previously unguarded — Firebase.initializeApp()
+    // succeeding doesn't mean the rest of Messaging/local-notifications setup
+    // will. A release-only mismatch (e.g. the release keystore's SHA-1 not
+    // registered, or Android 13+ notification-permission handling behaving
+    // differently in release) could throw here and — since main() awaits
+    // this — silently prevent the entire app from ever calling runApp().
+    // This whole block failing must only mean "no push notifications," not
+    // "no app."
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings();
-    await _local.initialize(
-      const InitializationSettings(android: androidInit, iOS: iosInit),
-    );
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings();
+      await _local.initialize(
+        const InitializationSettings(android: androidInit, iOS: iosInit),
+      );
+    } catch (e) {
+      debugPrint('Push notification permission/setup failed: $e');
+      return;
+    }
 
     // Foreground messages do NOT show a system banner on either platform
     // by default — FCM only auto-displays while backgrounded/terminated.

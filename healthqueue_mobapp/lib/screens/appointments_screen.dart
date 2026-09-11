@@ -7,7 +7,14 @@ import '../state/app_state.dart';
 import '../models/appointment_models.dart' as apt;
 
 class AppointmentsScreen extends StatefulWidget {
-  const AppointmentsScreen({super.key});
+  // Whether this tab is the one currently visible in AppShell's
+  // IndexedStack. Without this, the 15s poll timer below runs for the
+  // entire app session regardless of which tab the patient is actually
+  // looking at — the exact same issue DashboardScreen had with its own
+  // timer and embedded map (see app.dart / dashboard_screen.dart).
+  final bool isActive;
+
+  const AppointmentsScreen({super.key, this.isActive = true});
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
 }
@@ -18,24 +25,81 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   Timer?             _timer;
   // Track appointment statuses to detect changes
   Map<String, String> _prevStatuses = {};
+  AppState? _appState;
 
   static const _pollInterval = Duration(seconds: 15);
 
   @override
   void initState() {
     super.initState();
+    debugPrint('[APPT] initState isActive=${widget.isActive}');
     _tabs = TabController(length: 2, vsync: this);
-    _tabs.addListener(() { if (mounted) setState(() {}); });
+    _tabs.addListener(() {
+      debugPrint('[APPT] tab switched to index=${_tabs.index}');
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      debugPrint('[APPT] initState postFrameCallback fetch');
       context.read<AppState>().fetchAppointments();
     });
+    if (widget.isActive) _startPolling();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Belt-and-suspenders alongside the context.select() calls in build():
+    // in one reproduced case, fetchAppointments() completed and
+    // apptLoading correctly flipped to false (confirmed via logging —
+    // "fetchAppointments END ... apptLoading=false" fired) but this
+    // screen never rebuilt to show it, leaving the spinner stuck until
+    // something unrelated (switching the Upcoming/Past sub-tab) forced a
+    // rebuild through a completely different path (the TabController
+    // listener's own setState()). That means Provider's select()-based
+    // rebuild signal was missed in that case — root cause not fully
+    // pinned down, but a raw addListener here, the same reliable pattern
+    // QueueMonitoringScreen and AppShell already use elsewhere in this
+    // app, guarantees a rebuild on every single AppState change
+    // regardless of what edge case causes select() to miss one.
+    if (_appState == null) {
+      _appState = context.read<AppState>();
+      _appState!.addListener(_onAppStateChanged);
+    }
+  }
+
+  void _onAppStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant AppointmentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    debugPrint('[APPT] didUpdateWidget oldActive=${oldWidget.isActive} newActive=${widget.isActive}');
+    // Start/stop polling as this tab is switched into/out of view — see
+    // the isActive doc comment above.
+    if (widget.isActive && !oldWidget.isActive) {
+      _startPolling();
+      // Catch up immediately rather than waiting up to 15s for the first
+      // tick, since data may be stale from however long this tab was
+      // backgrounded.
+      _refresh();
+    } else if (!widget.isActive && oldWidget.isActive) {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  void _startPolling() {
+    _timer?.cancel();
     _timer = Timer.periodic(_pollInterval, (_) => _refresh());
   }
 
   Future<void> _refresh() async {
+    debugPrint('[APPT] _refresh() called');
     if (!mounted) return;
     final prev = Map<String, String>.from(_prevStatuses);
     await context.read<AppState>().fetchAppointments();
+    debugPrint('[APPT] _refresh() fetch completed, mounted=$mounted');
     if (!mounted) return;
     final appts = context.read<AppState>().appointments;
     // Detect status changes and notify
@@ -111,6 +175,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   @override
   void dispose() {
     _timer?.cancel();
+    _appState?.removeListener(_onAppStateChanged);
     _tabs.dispose();
     super.dispose();
   }
@@ -163,9 +228,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final state    = context.watch<AppState>();
-    final upcoming = state.upcomingAppointments;
-    final past     = state.pastAppointments;
+    // select(), not watch() — same reasoning as Dashboard. This tab was
+    // rebuilding on every AppState change even while backgrounded.
+    final upcoming =
+        context.select<AppState, List<apt.Appointment>>((s) => s.upcomingAppointments);
+    final past =
+        context.select<AppState, List<apt.Appointment>>((s) => s.pastAppointments);
+    final apptLoading = context.select<AppState, bool>((s) => s.apptLoading);
+    debugPrint('[APPT] build() apptLoading=$apptLoading upcoming=${upcoming.length} past=${past.length}');
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7FB),
@@ -199,7 +269,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
           ),
         ),
       ),
-      body: state.apptLoading
+      body: apptLoading
           ? const Center(child: CircularProgressIndicator())
           : TabBarView(
               controller: _tabs,
@@ -290,7 +360,12 @@ class _ApptList extends StatelessWidget {
         itemBuilder: (ctx, i) {
           final a = appointments[i];
           final statusColor = _statusColor(a.status);
-          return Container(
+          return RepaintBoundary(
+            // Every 15s refresh (or the 60s cross-tab watch) rebuilds this
+            // whole list — without this, every visible card's shadow
+            // redraws together even when only one appointment's status
+            // actually changed.
+            child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
@@ -358,6 +433,7 @@ class _ApptList extends StatelessWidget {
                 ],
               ),
             ),
+          ),
           );
         },
       ),

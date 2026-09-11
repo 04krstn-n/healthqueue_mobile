@@ -455,8 +455,12 @@ class AppState extends ChangeNotifier {
 
     _currentUser = null;
     _appointments = [];
+    _appointmentsView = null;
+    _upcomingView = null;
+    _pastView = null;
     _currentQueue = null;
     _chatMessages = [];
+    _chatVersion++;
     _chatHistoryLoaded = false;
     _pendingCallPopup = null;
     _queueSocket.disconnect();
@@ -597,22 +601,69 @@ class AppState extends ChangeNotifier {
   List<Appointment> _appointments = [];
   bool _apptLoading = false;
 
-  List<Appointment> get appointments => List.unmodifiable(_appointments);
+  // These three getters used to allocate a brand-new List on every single
+  // call (List.unmodifiable(...) / .where(...).toList() every time).
+  // Multiple screens (Dashboard, Appointments) call these every build via
+  // context.watch<AppState>() — since a fresh List instance is never `==`
+  // to the previous one, that made even a narrower context.select() call
+  // rebuild on every AppState change regardless of whether appointment
+  // data actually changed, defeating the point of scoping the listener.
+  // Caching here, invalidated only when _appointments is actually
+  // reassigned (see logout() and fetchAppointments() below), makes the
+  // same reference come back until there's a real change to report.
+  List<Appointment>? _appointmentsView;
+  List<Appointment>? _upcomingView;
+  List<Appointment>? _pastView;
+
+  List<Appointment> get appointments =>
+      _appointmentsView ??= List.unmodifiable(_appointments);
 
   bool get apptLoading => _apptLoading;
 
-  List<Appointment> get upcomingAppointments =>
-      _appointments.where((a) => a.isUpcoming).toList();
+  List<Appointment> get upcomingAppointments => _upcomingView ??=
+      List.unmodifiable(_appointments.where((a) => a.isUpcoming));
 
   List<Appointment> get pastAppointments =>
-      _appointments.where((a) => a.isPast).toList();
+      _pastView ??= List.unmodifiable(_appointments.where((a) => a.isPast));
+
+  // One-shot signal for a staff-side appointment status change (mirrors
+  // _pendingCallPopup's pattern below for queue calls). Populated by
+  // fetchAppointments() below — see its comment for why this exists
+  // separately from AppointmentsScreen's own local status tracking.
+  Appointment? _pendingApptStatusChange;
+  String? _pendingApptStatusFrom;
+  Map<String, String> _prevApptStatuses = {};
+
+  Appointment? get pendingApptStatusChange => _pendingApptStatusChange;
+  String? get pendingApptStatusFrom => _pendingApptStatusFrom;
+
+  void dismissApptStatusPopup() {
+    _pendingApptStatusChange = null;
+    _pendingApptStatusFrom = null;
+    notifyListeners();
+  }
 
   Future<void> fetchAppointments() async {
+    // TEMP DIAGNOSTIC — remove once the stuck-loading bug is found. Marks
+    // every call with a timestamp + call count so the terminal log shows
+    // exactly how many overlapping fetches happen around a single tab
+    // switch, and how long each one actually takes.
+    final _callId = DateTime.now().millisecondsSinceEpoch;
+    debugPrint('[APPT] fetchAppointments START id=$_callId apptLoading=$_apptLoading');
+
     _apptLoading = true;
+    // Invalidate now, before the reassignment below happens — cheaper than
+    // finding every exit path of the (long) mapping logic that follows,
+    // and correctness only requires the cache be clear by the time a
+    // getter is next read, which is always after this function returns.
+    _appointmentsView = null;
+    _upcomingView = null;
+    _pastView = null;
     notifyListeners();
 
     try {
       final list = await ApiService.getMyAppointments();
+      debugPrint('[APPT] fetchAppointments id=$_callId got ${list.length} appointments');
 
       _appointments = list.map((raw) {
         final m = raw as Map<String, dynamic>;
@@ -664,12 +715,53 @@ class AppState extends ChangeNotifier {
           notes: m['notes']?.toString() ?? '',
         );
       }).toList();
+
+      // Re-null the caches AGAIN now that _appointments actually has the
+      // fresh data — nulling them only before the await (above) was the
+      // bug: it made the loading spinner appear immediately (good), but
+      // anything that read upcomingAppointments/pastAppointments during
+      // that loading window (the spinner's own rebuild does exactly
+      // this) would lazily cache from the OLD data, and — since nothing
+      // invalidated it again after this point — stay stuck on that stale
+      // snapshot even once the real data arrived. This is what caused
+      // Upcoming to appear stuck/empty until switching tabs forced
+      // another fetch that happened to dodge the race.
+      _appointmentsView = null;
+      _upcomingView = null;
+      _pastView = null;
+
+      // Detect a status change (e.g. staff cancels/confirms an
+      // appointment server-side) and surface it as a one-shot global
+      // popup — the same pattern _pendingCallPopup uses for queue calls.
+      // This lives HERE, at the AppState level, rather than only inside
+      // AppointmentsScreen's own local _prevStatuses tracking, because
+      // AppointmentsScreen's poll now correctly pauses while that tab
+      // isn't the active one (see isActive in that file) to save CPU —
+      // which is the right call for performance, but it means THAT
+      // screen's own detection can't see a change that happened while
+      // it was backgrounded. AppShell owns a separate, tab-independent
+      // 60s timer (see app.dart) that keeps calling this function
+      // regardless of which tab is showing, purely so this detection
+      // below keeps running — the patient shouldn't have to be staring
+      // at the Appointments tab to find out their appointment got
+      // cancelled.
+      for (final a in _appointments) {
+        final prev = _prevApptStatuses[a.id];
+        final cur = a.status.name;
+        if (prev != null && prev != cur) {
+          _pendingApptStatusChange = a;
+          _pendingApptStatusFrom = prev;
+        }
+      }
+      _prevApptStatuses = {for (final a in _appointments) a.id: a.status.name};
     } catch (e) {
       debugPrint(
         'fetchAppointments error: $e',
       );
+      debugPrint('[APPT] fetchAppointments id=$_callId ERROR: $e');
     } finally {
       _apptLoading = false;
+      debugPrint('[APPT] fetchAppointments END id=$_callId apptLoading=$_apptLoading');
       notifyListeners();
     }
   }
@@ -681,6 +773,19 @@ class AppState extends ChangeNotifier {
       0,
       appt,
     );
+    // This is a direct in-place mutation of _appointments (insert, not
+    // reassignment), so the reference-cached getters added earlier
+    // (appointments/upcomingAppointments/pastAppointments) don't
+    // automatically know anything changed — they'd keep returning the
+    // pre-booking list until the fetchAppointments() call below happens
+    // to succeed. That's exactly the bug where a freshly-booked
+    // appointment didn't show up until switching tabs forced a real
+    // re-fetch. Invalidating here means the very next notifyListeners()
+    // — the one right below, before any network round-trip — already
+    // reflects the new appointment.
+    _appointmentsView = null;
+    _upcomingView = null;
+    _pastView = null;
 
     notifyListeners();
 
@@ -705,9 +810,25 @@ class AppState extends ChangeNotifier {
       if (idx != -1) {
         _appointments[idx] =
             _appointments[idx].copyWith(status: AppointmentStatus.cancelled);
+        // Same in-place-mutation cache issue as addAppointment() above.
+        _appointmentsView = null;
+        _upcomingView = null;
+        _pastView = null;
+        // Keep this in sync with the optimistic update above — otherwise
+        // the NEXT fetchAppointments() (right below) compares its fresh
+        // 'cancelled' status against a _prevApptStatuses entry that's
+        // already 'cancelled' from here, sees no change, and never fires
+        // the global cancellation popup for what should be a fresh event.
+        _prevApptStatuses[id] = AppointmentStatus.cancelled.name;
         notifyListeners();
       }
-      fetchAppointments();
+      // Was fire-and-forget (not awaited) — that let this race with the
+      // optimistic update above: this call nulls the same three caches
+      // again before ITS OWN network round-trip, so a rebuild triggered
+      // in that window could re-cache from a transitional state. Awaiting
+      // it makes the whole cancel operation resolve as one clean
+      // sequence: optimistic update -> server sync -> done.
+      await fetchAppointments();
     }
     return ok;
   }
@@ -733,6 +854,10 @@ class AppState extends ChangeNotifier {
       timeLabel: timeLabel,
       notes: notes,
     );
+    // Same in-place-mutation cache issue as addAppointment() above.
+    _appointmentsView = null;
+    _upcomingView = null;
+    _pastView = null;
 
     notifyListeners();
 
@@ -1164,6 +1289,17 @@ class AppState extends ChangeNotifier {
   List<ChatMessage> _chatMessages = [];
   bool _chatLoading = false;
 
+  // _chatMessages is mutated in place (.add/.clear) rather than reassigned,
+  // so — unlike appointments above — a simple reference-identity cache on
+  // the list itself doesn't work here (the reference never changes, only
+  // its contents do). This counter is a cheap, always-correct proxy: bump
+  // it on every mutation below, and ChatbotScreen can select() on THIS
+  // instead of on messages directly, so it only rebuilds when chat
+  // content actually changed rather than on every unrelated AppState
+  // change (queue pings, appointment polls, etc.).
+  int _chatVersion = 0;
+  int get chatVersion => _chatVersion;
+
   List<ChatMessage> get messages => List.unmodifiable(
         _chatMessages,
       );
@@ -1176,6 +1312,7 @@ class AppState extends ChangeNotifier {
     ChatMessage msg,
   ) {
     _chatMessages.add(msg);
+    _chatVersion++;
     notifyListeners();
   }
 
@@ -1191,7 +1328,7 @@ class AppState extends ChangeNotifier {
         quickReplies: quickReplies,
       ),
     );
-
+    _chatVersion++;
     notifyListeners();
   }
 
@@ -1208,6 +1345,7 @@ class AppState extends ChangeNotifier {
         timestamp: DateTime.now(),
       ),
     );
+    _chatVersion++;
     notifyListeners();
   }
 
@@ -1232,7 +1370,7 @@ class AppState extends ChangeNotifier {
         timestamp: DateTime.now(),
       ),
     );
-
+    _chatVersion++;
     notifyListeners();
   }
 
@@ -1304,6 +1442,7 @@ class AppState extends ChangeNotifier {
       }
       if (restored.isNotEmpty) {
         _chatMessages = restored;
+        _chatVersion++;
         notifyListeners();
       } else {
         seedChatIfEmpty();
@@ -1318,6 +1457,7 @@ class AppState extends ChangeNotifier {
 
   void clearChat() {
     _chatMessages.clear();
+    _chatVersion++;
     notifyListeners();
   }
 }

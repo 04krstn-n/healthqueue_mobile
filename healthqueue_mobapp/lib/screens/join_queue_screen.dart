@@ -197,7 +197,12 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => RepaintBoundary(
+        // Same reasoning as everywhere else — Material's default dialog
+        // elevation paints a real shadow, and this dialog opens during
+        // the busiest moment on this screen (queue-join in flight, state
+        // cascading through several listeners).
+        child: AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
         ),
@@ -280,6 +285,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
 
@@ -416,10 +422,11 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
       try {
         final status = await ApiService.getMyQueueStatus();
 
-        if (status is Map) {
-          final statusMap = Map<String, dynamic>.from(
-            status as Map,
-          );
+        // getMyQueueStatus() already returns Map<String, dynamic> — the
+        // old `if (status is Map)` check and `as Map` cast were always
+        // true/redundant (that's what the analyzer was flagging).
+        {
+          final statusMap = status;
 
           Map<String, dynamic> serverEntry = {};
 
@@ -533,7 +540,8 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (_) => RepaintBoundary(
+          child: AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
           ),
@@ -620,6 +628,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ),
           ],
         ),
+        ),
       );
     }
 
@@ -646,10 +655,9 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
       try {
         final status = await ApiService.getMyQueueStatus();
 
-        if (status is Map) {
-          final statusMap = Map<String, dynamic>.from(
-            status as Map,
-          );
+        // Same as above — status is already Map<String, dynamic>.
+        {
+          final statusMap = status;
 
           serverHasQueue = statusMap['inQueue'] == true ||
               statusMap['entry'] != null ||
@@ -714,7 +722,8 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
       await showDialog(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (_) => RepaintBoundary(
+          child: AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -743,6 +752,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ),
           ],
         ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -767,7 +777,15 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
     await showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
+      builder: (_) => RepaintBoundary(
+        // This dialog opens right as the queue-join API call completes
+        // and AppState's currentQueue update cascades through several
+        // listeners (QueueMonitoringScreen, AppShell's call-popup check,
+        // any screen selecting on it) — probably the single busiest
+        // moment in the app. Isolating this dialog's own shadow means
+        // that cascade doesn't force it to redraw on every one of those
+        // unrelated updates while it's just sitting there.
+        child: AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
@@ -839,6 +857,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -987,11 +1006,23 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(20),
-                    child: [
-                      _buildStep1(),
-                      _buildStep2(),
-                      _buildStep3(),
-                    ][_step - 1],
+                    // Was: [_buildStep1(), _buildStep2(), _buildStep3()][_step - 1]
+                    // A Dart list literal evaluates every element before
+                    // indexing into it — so that line was calling all
+                    // three _buildStepN() methods, constructing all three
+                    // steps' entire widget trees, on EVERY rebuild,
+                    // regardless of which one was actually shown. Two
+                    // thirds of that work was always thrown away. This is
+                    // exactly the "high Build time, near-zero Raster
+                    // time" pattern the DevTools trace flagged repeatedly
+                    // on this screen — pure wasted Dart-side construction,
+                    // not a rendering/GPU cost. A real switch only builds
+                    // the step that's actually needed.
+                    child: switch (_step) {
+                      1 => _buildStep1(),
+                      2 => _buildStep2(),
+                      _ => _buildStep3(),
+                    },
                   ),
                 ),
 

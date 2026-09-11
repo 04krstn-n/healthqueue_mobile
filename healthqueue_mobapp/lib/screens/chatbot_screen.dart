@@ -410,9 +410,25 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
 @override
   Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
+    // select() on chatVersion (a cheap int), not watch<AppState>() on the
+    // whole object. This screen previously rebuilt on every AppState
+    // change — a queue ping, an appointment poll, anything — even while
+    // backgrounded (IndexedStack keeps it mounted). _chatMessages is
+    // mutated in place (.add()) rather than reassigned, so unlike
+    // appointments it can't be cached by reference; chatVersion is a
+    // counter AppState bumps on every real chat mutation, giving the same
+    // "only rebuild when this actually changed" effect.
+    context.select<AppState, int>((s) => s.chatVersion);
+    final appState = context.read<AppState>();
     final messages = appState.messages;
-    final clinicChipLabel = _effectiveClinicName(appState) ?? 'Select clinic';
+    // Selecting on the computed String (not the raw currentQueue/
+    // upcomingAppointments objects) means this correctly rebuilds only
+    // when the displayed clinic name actually changes — String has real
+    // value equality, so this avoids the same "fresh object every call"
+    // trap those getters have without needing to touch them again here.
+    final clinicChipLabel =
+        context.select<AppState, String?>((s) => _effectiveClinicName(s)) ??
+            'Select clinic';
 
     return SafeArea(
       bottom: false, // Prevents interfering with the keyboard and bottom input bar
@@ -576,7 +592,12 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           ),
 
           // ── Input bar ──────────────────────────────────────────────────────
-          Container(
+          RepaintBoundary(
+            // This bar is visible the whole time the patient is typing —
+            // exactly the keyboard-animation-jank pattern found on the
+            // login screen, but worse here since it's on screen for the
+            // entire chat session, not just briefly at sign-in.
+            child: Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -629,6 +650,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                 ),
               ],
             ),
+          ),
           ),
         ],
       ),
@@ -696,7 +718,13 @@ class _MessageBubble extends StatelessWidget {
             const SizedBox(width: 8),
           ],
           Flexible(
-            child: Container(
+            child: RepaintBoundary(
+              // Every new message bumps chatVersion and rebuilds this
+              // list; every keyboard open/close also re-lays-out the
+              // whole message viewport. Without this, every bubble's
+              // shadow redraws together on both of those, not just the
+              // new one.
+              child: Container(
               margin: const EdgeInsets.only(bottom: 4),
               padding: const EdgeInsets.symmetric(
                   horizontal: 14, vertical: 10),
@@ -723,6 +751,7 @@ class _MessageBubble extends StatelessWidget {
                       fontSize: 13,
                       color: isUser ? Colors.white : const Color(0xFF1F2937),
                       height: 1.5)),
+            ),
             ),
           ),
           if (isUser) const SizedBox(width: 8),

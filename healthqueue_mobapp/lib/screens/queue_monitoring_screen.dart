@@ -446,9 +446,9 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel Queue?',
+        title: const Text('Leave Queue?',
             style: TextStyle(fontWeight: FontWeight.w800)),
-        content: const Text('Are you sure you want to cancel your queue?'),
+        content: const Text('Are you sure you want to leave your queue?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -460,7 +460,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel'),
+            child: const Text('Leave'),
           ),
         ],
       ),
@@ -660,7 +660,14 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                           ),
 
                         // ── Main queue card ─────────────────────────────────────
-                        Container(
+                        RepaintBoundary(
+                          // This screen listens to AppState via a raw
+                          // addListener (see _onAppStateChanged above),
+                          // which fires on EVERY AppState change app-wide —
+                          // a chat message, an appointment poll, anything —
+                          // not just queue-related ones. Without this, this
+                          // card's shadow redraws on all of them.
+                          child: Container(
                           width: double.infinity,
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
@@ -711,6 +718,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                                   _numCol('~$wait min', 'Est. Wait'),
                                 ]),
                           ]),
+                        ),
                         ),
                         const SizedBox(height: 16),
 

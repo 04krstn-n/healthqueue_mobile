@@ -71,12 +71,14 @@ class ApiService {
         }
         return res;
       } on TimeoutException {
-        if (i == retries)
+        if (i == retries) {
           throw Exception('Connection timed out. Please check your network.');
+        }
         await Future.delayed(Duration(seconds: i + 1));
       } on SocketException {
-        if (i == retries)
+        if (i == retries) {
           throw Exception('No internet connection. Please check your network.');
+        }
         await Future.delayed(Duration(seconds: i + 1));
       }
     }
@@ -667,8 +669,9 @@ class ApiService {
     _assertOk(res, 'Failed to load appointments');
     final data = jsonDecode(res.body);
     if (data is List) return data;
-    if (data is Map)
+    if (data is Map) {
       return (data['appointments'] ?? data['data'] ?? []) as List;
+    }
     return [];
   }
 
@@ -820,8 +823,9 @@ class ApiService {
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body);
       if (data is List) return data;
-      if (data is Map)
+      if (data is Map) {
         return (data['notifications'] ?? data['data'] ?? []) as List;
+      }
       return [];
     } catch (_) {
       return [];

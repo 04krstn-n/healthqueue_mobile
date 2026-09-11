@@ -13,6 +13,7 @@ import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../state/app_state.dart';
 import '../models/queue_models.dart';
+import '../models/user_models.dart';
 
 class _ScoredClinic {
   final Clinic clinic;
@@ -29,15 +30,24 @@ class _ScoredClinic {
 }
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  // Whether this tab is the one currently visible in AppShell's
+  // IndexedStack. IndexedStack never disposes off-screen tabs, so without
+  // this flag the embedded GoogleMap and the 15s poll timer below would
+  // keep running for the entire session even while the patient is on a
+  // different tab.
+  final bool isActive;
+
+  const DashboardScreen({super.key, this.isActive = true});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final Completer<GoogleMapController> _mapCtrl =
-      Completer<GoogleMapController>();
+  // Not final: reset to a fresh Completer each time the map is unmounted
+  // (tab goes inactive) so the next mount's onMapCreated can complete it
+  // again — a Completer can only ever be completed once.
+  Completer<GoogleMapController> _mapCtrl = Completer<GoogleMapController>();
 
   static const LatLng _metroManila = LatLng(14.5995, 120.9842);
 
@@ -72,7 +82,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _loadNotifications();
     });
 
-    // Refresh queue status and notifications every 15 seconds.
+    if (widget.isActive) _startPolling();
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Start/stop the poll (and, via build(), mount/unmount the GoogleMap)
+    // as this tab is switched into/out of view — see the isActive doc
+    // comment above for why this matters.
+    if (widget.isActive && !oldWidget.isActive) {
+      _startPolling();
+      // Catch up immediately instead of waiting up to 15s for the first
+      // tick, since data may be stale from however long this tab was
+      // backgrounded.
+      context.read<AppState>().fetchQueueStatus();
+      _loadNotifications();
+    } else if (!widget.isActive && oldWidget.isActive) {
+      _timer?.cancel();
+      _timer = null;
+      // The GoogleMap below is about to unmount — give it a fresh
+      // Completer so the next mount's onMapCreated can complete it again.
+      _mapCtrl = Completer<GoogleMapController>();
+    }
+  }
+
+  void _startPolling() {
+    _timer?.cancel();
+    // Refresh queue status and notifications every 15 seconds — only while
+    // this tab is actually the one on screen.
     _timer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted) return;
 
@@ -338,7 +376,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             alignment: Alignment.topRight,
             child: GestureDetector(
               onTap: () {},
-              child: Container(
+              child: RepaintBoundary(
+                // The notification panel's shadow needs an expensive blur
+                // pass. Without this, ANY Dashboard rebuild — including
+                // ones triggered by unrelated queue/appointment updates
+                // elsewhere on the screen — forces this panel's shadow to
+                // redraw too, even while it's just sitting open, unchanged.
+                child: Container(
                 margin: const EdgeInsets.only(
                   top: 58,
                   right: 8,
@@ -543,6 +587,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
               ),
+              ),
             ),
           ),
         ),
@@ -574,11 +619,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final appState = context.watch<AppState>();
-    final user = appState.currentUser;
-
-    final qStatus = appState.currentQueueStatus;
-    final appts = appState.appointments;
+    // select(), not watch() — Dashboard previously rebuilt its entire tree
+    // (map, cards, everything) on ANY AppState change: a chat message
+    // arriving, a notification, appointment-loading flags flipping — none
+    // of which this screen displays. Because IndexedStack keeps Dashboard
+    // mounted even when it's not the visible tab, that meant this rebuild
+    // happened in the background the whole session, not just while
+    // looking at Home. Selecting the three specific fields below means
+    // this only rebuilds when one of THEM actually changes.
+    final user = context.select<AppState, AppUser?>((s) => s.currentUser);
+    final currentQueueEntry =
+        context.select<AppState, QueueEntry?>((s) => s.currentQueue);
+    final appts =
+        context.select<AppState, List<Appointment>>((s) => s.appointments);
+    // currentQueueStatus itself constructs a brand-new ActiveQueueStatus
+    // object on every single call (see AppState), so selecting on it
+    // directly would defeat the point above — it would never compare
+    // equal to its previous value even when nothing changed. Deriving it
+    // here from the already-narrowed currentQueueEntry gets the same
+    // result without that.
+    final qStatus = currentQueueEntry == null
+        ? ActiveQueueStatus.none()
+        : ActiveQueueStatus.fromQueueEntry(currentQueueEntry);
 
     // Next upcoming appointment
     final now = DateTime.now();
@@ -774,8 +836,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Column(
                           children: _recommended
                               .map(
-                                (r) => _RecommendationCard(
-                                  rec: r,
+                                (r) => RepaintBoundary(
+                                  child: _RecommendationCard(
+                                    rec: r,
+                                  ),
                                 ),
                               )
                               .toList(),
@@ -792,22 +856,69 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         borderRadius: BorderRadius.circular(16),
                         child: SizedBox(
                           height: 200,
-                          child: GoogleMap(
-                            onMapCreated: (c) {
-                              if (!_mapCtrl.isCompleted) {
-                                _mapCtrl.complete(c);
-                              }
-                            },
-                            initialCameraPosition: const CameraPosition(
-                              target: _metroManila,
-                              zoom: 12,
-                            ),
-                            markers: _markers,
-                            myLocationEnabled: true,
-                            myLocationButtonEnabled: false,
-                            zoomControlsEnabled: false,
-                            mapToolbarEnabled: false,
-                          ),
+                          // GoogleMap is a native platform view — it keeps
+                          // rendering (tile animation, the pulsing
+                          // my-location dot, GPU compositing) even while
+                          // this tab isn't visible, because IndexedStack
+                          // never disposes it. Only mount the real map
+                          // while this tab is active; otherwise show a
+                          // cheap static placeholder that swaps back in
+                          // instantly when the patient returns here. This
+                          // was the single biggest driver of the app's
+                          // sustained CPU/GPU load, memory footprint, and
+                          // dropped frames.
+                          child: widget.isActive
+                              ? GoogleMap(
+                                  onMapCreated: (c) {
+                                    if (!_mapCtrl.isCompleted) {
+                                      _mapCtrl.complete(c);
+                                    }
+                                  },
+                                  initialCameraPosition: const CameraPosition(
+                                    target: _metroManila,
+                                    zoom: 12,
+                                  ),
+                                  markers: _markers,
+                                  // Same redundant-layer issue as
+                                  // ClinicMapScreen: _rebuildMarkers()
+                                  // below already adds a custom '_user'
+                                  // marker at this exact position, so the
+                                  // native my-location blue-dot layer was
+                                  // just duplicate continuous rendering
+                                  // cost for as long as this tab is
+                                  // active.
+                                  myLocationEnabled: false,
+                                  myLocationButtonEnabled: false,
+                                  zoomControlsEnabled: false,
+                                  mapToolbarEnabled: false,
+                                  // This preview is purely decorative — the
+                                  // "Open Full Map" button and the "Find
+                                  // Clinic" quick action both already send
+                                  // the patient to ClinicMapScreen for any
+                                  // real interaction (panning, zooming,
+                                  // tapping markers). liteModeEnabled swaps
+                                  // the live, continuously-rendering map
+                                  // for a single static bitmap snapshot —
+                                  // same markers, same look, but zero
+                                  // ongoing GPU/CPU cost while this tab is
+                                  // active. The gesture layers below cost
+                                  // nothing to disable explicitly even
+                                  // though liteMode doesn't use them.
+                                  liteModeEnabled: true,
+                                  compassEnabled: false,
+                                  rotateGesturesEnabled: false,
+                                  tiltGesturesEnabled: false,
+                                  indoorViewEnabled: false,
+                                )
+                              : Container(
+                                  color: const Color(0xFFE5E7EB),
+                                  alignment: Alignment.center,
+                                  child: const Icon(
+                                    Icons.map_outlined,
+                                    size: 32,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
+                                ),
                         ),
                       ),
 
@@ -912,7 +1023,13 @@ class _ActiveQueueCard extends StatelessWidget {
     // `called` status — see queue_models.dart.
     final isCalled = e.isCalled;
 
-    return Container(
+    return RepaintBoundary(
+      // This card's own content legitimately changes with queue status,
+      // so it still repaints when it should — this just stops OUTER
+      // Dashboard-level rebuilds (unrelated appointment/user changes
+      // elsewhere on screen) from forcing its gradient+shadow to redraw
+      // when nothing about the queue status itself changed.
+      child: Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1115,6 +1232,7 @@ class _ActiveQueueCard extends StatelessWidget {
           ),
         ],
       ),
+    ),
     );
   }
 }
