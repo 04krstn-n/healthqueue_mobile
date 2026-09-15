@@ -4,6 +4,7 @@ class ChatMessage {
   final String        text;           // message content
   final bool          isUser;         // true = patient, false = bot/staff
   final bool          isStaff;        // true = authored by a staff member (only meaningful when isUser is false)
+  final String?       staffName;      // who replied, when isStaff — for the "Staff (name)" label
   final DateTime      timestamp;
   final List<String>  quickReplies;
 
@@ -13,6 +14,7 @@ class ChatMessage {
     required this.isUser,
     required this.timestamp,
     this.isStaff = false,
+    this.staffName,
     this.quickReplies = const [],
   }) : id = id ?? '';
 }

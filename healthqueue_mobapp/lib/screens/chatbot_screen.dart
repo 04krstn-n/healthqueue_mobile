@@ -724,34 +724,65 @@ class _MessageBubble extends StatelessWidget {
               // whole message viewport. Without this, every bubble's
               // shadow redraws together on both of those, not just the
               // new one.
-              child: Container(
-              margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? AppColors.primary
-                    : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft:     const Radius.circular(16),
-                  topRight:    const Radius.circular(16),
-                  bottomLeft:  Radius.circular(isUser ? 16 : 4),
-                  bottomRight: Radius.circular(isUser ? 4  : 16),
-                ),
-                border: isUser
-                    ? null
-                    : Border.all(color: Colors.grey.shade100),
-                boxShadow: [BoxShadow(
-                    blurRadius: 4,
-                    color: Colors.black.withValues(alpha: .05),
-                    offset: const Offset(0, 1))],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (msg.isStaff)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 2, bottom: 2),
+                      child: Text(
+                        msg.staffName != null && msg.staffName!.isNotEmpty
+                            ? 'Staff · ${msg.staffName}'
+                            : 'Staff',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF16A34A),
+                        ),
+                      ),
+                    ),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isUser
+                          ? AppColors.primary
+                          : Colors.white,
+                      borderRadius: BorderRadius.only(
+                        topLeft:     const Radius.circular(16),
+                        topRight:    const Radius.circular(16),
+                        bottomLeft:  Radius.circular(isUser ? 16 : 4),
+                        bottomRight: Radius.circular(isUser ? 4  : 16),
+                      ),
+                      // Staff replies get a distinct green outline so
+                      // they're visually obvious at a glance next to bot
+                      // answers (grey outline) and the patient's own
+                      // messages (filled, no outline) — this is what
+                      // msg.isStaff was already tracking (used for the
+                      // avatar icon/color above) but the bubble itself
+                      // never reflected it.
+                      border: isUser
+                          ? null
+                          : Border.all(
+                              color: msg.isStaff
+                                  ? const Color(0xFF16A34A)
+                                  : Colors.grey.shade100,
+                              width: msg.isStaff ? 1.4 : 1,
+                            ),
+                      boxShadow: [BoxShadow(
+                          blurRadius: 4,
+                          color: Colors.black.withValues(alpha: .05),
+                          offset: const Offset(0, 1))],
+                    ),
+                    child: Text(msg.text,
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: isUser ? Colors.white : const Color(0xFF1F2937),
+                            height: 1.5)),
+                  ),
+                ],
               ),
-              child: Text(msg.text,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: isUser ? Colors.white : const Color(0xFF1F2937),
-                      height: 1.5)),
-            ),
             ),
           ),
           if (isUser) const SizedBox(width: 8),

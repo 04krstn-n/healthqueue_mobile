@@ -5,6 +5,7 @@ import '../core/constants/app_colors.dart';
 import '../core/routes/app_routes.dart';
 import '../state/app_state.dart';
 import '../widgets/otp_input_field.dart';
+import 'policy_viewer_screen.dart';
 
 
 class RegisterScreen extends StatefulWidget {
@@ -30,6 +31,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _showConfirm    = false;
   bool _agreed         = false;
   bool _agreedError    = false; // Extra flag to handle visual checkbox error state
+  // Item 2/3: the checkbox above must not be checkable at all until the
+  // user has actually reached the bottom of BOTH the Terms & Agreements
+  // and the Privacy Policy in PolicyViewerScreen — set only when that
+  // screen pops back `true`.
+  bool _hasReadPolicies = false;
+  // Both the "(tap to read)" hint and the "please read first" helper line
+  // stay hidden until the user actually tries to proceed without having
+  // read the policies yet — set true the first time _proceedToOtp blocks
+  // on this, not shown unconditionally from the moment the form opens.
+  bool _showPolicyHint = false;
+  // Shared left-indent so the "please read first" / "please accept"
+  // helper lines under the checkbox row line up with the checkbox's LABEL
+  // text ("I agree to...") rather than sitting almost flush under the
+  // checkbox itself.
+  static const double _checkboxLeadWidth = 40;
+
+  // Live password-requirement checklist state, recomputed on every
+  // keystroke (see _passCtrl's listener in initState) — item 5's "show a
+  // password requirement checklist that updates as the user types".
+  bool _pwHasLength  = false;
+  bool _pwHasUpper   = false;
+  bool _pwHasLower   = false;
+  bool _pwHasNumber  = false;
+  bool _pwHasSpecial = false;
+  bool get _pwAllMet => _pwHasLength && _pwHasUpper && _pwHasLower && _pwHasNumber && _pwHasSpecial;
+
+  // Set right after a wrong-OTP response so OtpInputField shows a red
+  // border + shakes once (item 1) instead of only a dialog. Cleared as
+  // soon as the user edits the code again.
+  bool _otpHasError = false;
+  // Brief green checkmark shown right before navigating away on success
+  // (item 1: "show a success state ... after successful verification").
+  bool _otpSuccess = false;
 
   // OTP step (phone registration only) — the code itself is generated and
   // verified server-side; this screen just tracks the pending account and a
@@ -69,6 +103,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
       // Any OTP from the original registration may be long expired by now —
       // request a fresh one as soon as this screen opens.
       WidgetsBinding.instance.addPostFrameCallback((_) => _resendOtp());
+    }
+    _passCtrl.addListener(_updatePasswordChecklist);
+  }
+
+  void _updatePasswordChecklist() {
+    final v = _passCtrl.text;
+    setState(() {
+      _pwHasLength  = v.length >= 8;
+      _pwHasUpper   = RegExp(r'[A-Z]').hasMatch(v);
+      _pwHasLower   = RegExp(r'[a-z]').hasMatch(v);
+      _pwHasNumber  = RegExp(r'\d').hasMatch(v);
+      _pwHasSpecial = RegExp(r'[^\w\s]').hasMatch(v);
+    });
+  }
+
+  // Opens the full Terms & Agreements / Privacy Policy viewer. The
+  // checkbox stays disabled until this returns `true` (only possible once
+  // the user has scrolled to the bottom of both documents — see
+  // PolicyViewerScreen) — tapping the link text is what starts that, not
+  // an alternate way to skip it.
+  Future<void> _openPolicyViewer() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const PolicyViewerScreen()),
+    );
+    if (result == true && mounted) {
+      setState(() => _hasReadPolicies = true);
     }
   }
 
@@ -139,6 +200,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (_pendingUserId == null) return;
     _otpAttempts = 0;
     _otpCtrl.clear();
+    setState(() { _otpHasError = false; _otpSuccess = false; });
 
     try {
       final appState = context.read<AppState>();
@@ -242,6 +304,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // 1. Reset checkbox error UI flag
     setState(() => _agreedError = !_agreed);
 
+    if (!_hasReadPolicies) {
+      setState(() => _showPolicyHint = true);
+      await _showErrorDialog('Terms & Privacy Policy',
+          'Please open and read through the Terms & Agreements and Privacy Policy before continuing.');
+      return;
+    }
+
     // 2. Fire structural Form validation (Executes all inline field text logic)
     if (!_formKey.currentState!.validate() || !_agreed) {
       return; // Stops thread if any text field logic returns string rules
@@ -293,12 +362,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final appState = context.read<AppState>();
     if (appState.isLoading) return;
 
+    setState(() => _otpHasError = false);
+
     try {
       await appState.completeRegistration(
         userId: _pendingUserId!,
         otp: _otpCtrl.text.trim(),
         fallback: _pendingBody ?? const {},
       );
+      if (!mounted) return;
+      // Brief success state before navigating away (item 1) — otherwise
+      // a correct code just instantly jumps to the home screen with no
+      // visible confirmation that verification actually succeeded.
+      setState(() => _otpSuccess = true);
+      await Future.delayed(const Duration(milliseconds: 700));
       if (mounted) Navigator.pushReplacementNamed(context, AppRoutes.shell);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
@@ -307,11 +384,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await _showErrorDialog('OTP Expired', 'Your OTP has expired. Please request a new one.');
         return;
       }
-      _otpAttempts++;
-      final left = _maxOtpAttempts - _otpAttempts;
-      await _showErrorDialog('Wrong OTP', left > 0
-          ? 'Incorrect code. $left attempt${left == 1 ? "" : "s"} remaining.'
-          : 'No attempts left. Please resend OTP.');
+      setState(() => _otpHasError = true);
+      _otpAttempts++; // keeps _canAttemptOtp()'s local pre-check in sync with the server
+      // The server is authoritative on attempts remaining/lockout (see
+      // authController.verifyOTP's MAX_OTP_ATTEMPTS) — its message text is
+      // shown directly rather than re-deriving a count from a local
+      // counter that could drift from what the server actually enforced.
+      if (msg.toLowerCase().contains('maximum attempts')) {
+        await _showErrorDialog('Too Many Attempts', msg);
+      } else {
+        await _showErrorDialog('Incorrect Code', msg);
+      }
     }
   }
 
@@ -325,6 +408,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   // ── OTP screen ─────────────────────────────────────────────────────────────
   Widget _buildOtpScreen(bool isLoading) {
+    final otpComplete = _otpCtrl.text.trim().length == 6;
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -337,74 +421,136 @@ class _RegisterScreenState extends State<RegisterScreen> {
             setState(() => _otpStep = false);
           },
         ),
-        title: const Text('Verify Phone Number',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Enter the 6-digit code sent to\n$_pendingPhone',
-              style: const TextStyle(fontSize: 15, color: Colors.black54,
-                  height: 1.5)),
-          const SizedBox(height: 28),
+      // Centered both visually and with spacing (item 1) — the old layout
+      // was top-left aligned starting right under the app bar with no
+      // vertical centering at all.
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: .1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _otpSuccess ? Icons.check_circle : Icons.sms_outlined,
+                      color: _otpSuccess ? const Color(0xFF16A34A) : AppColors.primary,
+                      size: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text('Enter OTP',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900,
+                          color: AppColors.textDark)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Enter the verification code sent to your mobile number.\n$_pendingPhone',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13.5, color: AppColors.textMuted, height: 1.5),
+                  ),
+                  const SizedBox(height: 28),
 
-          // Expiry countdown
-          Builder(builder: (_) {
-            final left = _otpSecondsLeft;
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                _otpExpired ? 'OTP has expired'
-                    : 'Expires in ${_formatCountdown(left)}',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: _otpExpired ? Colors.red
-                      : left < 30 ? Colors.orange : Colors.green),
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: left / _otpValidSeconds,
-                  backgroundColor: Colors.grey.shade200,
-                  color: _otpExpired ? Colors.red
-                      : left < 30 ? Colors.orange : AppColors.primary,
-                  minHeight: 3,
-                ),
-              ),
-            ]);
-          }),
-          const SizedBox(height: 20),
+                  // Expiry countdown
+                  Builder(builder: (_) {
+                    final left = _otpSecondsLeft;
+                    return Column(children: [
+                      Text(
+                        _otpExpired ? 'OTP has expired'
+                            : 'Expires in ${_formatCountdown(left)}',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                          color: _otpExpired ? Colors.red
+                              : left < 30 ? Colors.orange : const Color(0xFF16A34A)),
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: SizedBox(
+                          width: 220,
+                          child: LinearProgressIndicator(
+                            value: left / _otpValidSeconds,
+                            backgroundColor: Colors.grey.shade200,
+                            color: _otpExpired ? Colors.red
+                                : left < 30 ? Colors.orange : AppColors.primary,
+                            minHeight: 3,
+                          ),
+                        ),
+                      ),
+                    ]);
+                  }),
+                  const SizedBox(height: 24),
 
-          OtpInputField(
-            controller: _otpCtrl,
-          ),
-          const SizedBox(height: 24),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: isLoading ? null : _verifyAndRegister,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(52),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  OtpInputField(
+                    controller: _otpCtrl,
+                    hasError: _otpHasError,
+                    onChanged: (_) {
+                      if (_otpHasError) setState(() => _otpHasError = false);
+                      // Rebuilds to re-evaluate `otpComplete` for the
+                      // Verify button's enabled state (item 1: "prevent
+                      // submission when the OTP is incomplete" — now
+                      // reflected as a disabled button, not just a
+                      // post-tap validation message).
+                      setState(() {});
+                    },
+                    onCompleted: (_) {
+                      if (!isLoading && !_otpExpired) _verifyAndRegister();
+                    },
+                  ),
+                  if (_otpHasError) ...[
+                    const SizedBox(height: 10),
+                    const Text('Incorrect code. Please try again.',
+                        style: TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
+                  ],
+                  if (_otpSuccess) ...[
+                    const SizedBox(height: 10),
+                    const Text('Verified! Setting up your account…',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF16A34A), fontWeight: FontWeight.w700)),
+                  ],
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: (isLoading || !otpComplete || _otpExpired || _otpSuccess)
+                          ? null : _verifyAndRegister,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        minimumSize: const Size.fromHeight(52),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: isLoading
+                          ? const SizedBox(width: 20, height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : Text(_otpSuccess ? 'Verified' : 'Verify & Create Account',
+                              style: const TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _otpResendCooldown > 0
+                      ? Text('Resend in ${_otpResendCooldown}s',
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
+                      : TextButton(
+                          onPressed: _resendOtp,
+                          child: const Text('Resend OTP',
+                              style: TextStyle(fontWeight: FontWeight.w700))),
+                ],
               ),
-              child: isLoading
-                  ? const SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2))
-                  : const Text('Verify & Create Account',
-                      style: TextStyle(fontWeight: FontWeight.w800)),
             ),
           ),
-          const SizedBox(height: 16),
-          Center(child: _otpResendCooldown > 0
-              ? Text('Resend in ${_otpResendCooldown}s',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
-              : TextButton(
-                  onPressed: _resendOtp,
-                  child: const Text('Resend OTP',
-                      style: TextStyle(fontWeight: FontWeight.w700)))),
-        ]),
+        ),
       ),
     );
   }
@@ -565,10 +711,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             () => setState(() => _showPassword = !_showPassword),
                             validator: (v) {
                               if (v == null || v.isEmpty) return 'Please enter a password.';
-                              if (!_passRegex.hasMatch(v)) return 'Must contain 8+ characters, uppercase, lowercase, numbers & symbols.';
+                              if (!_passRegex.hasMatch(v)) return 'Password does not meet the requirements below.';
                               return null;
                             }
                           ),
+                          // Hidden until the user actually starts typing a
+                          // password — showing 5 unmet requirements on an
+                          // empty field just reads as clutter before
+                          // there's anything to check against.
+                          if (_passCtrl.text.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            _passwordChecklist(),
+                          ],
                           const SizedBox(height: 14),
 
                           _passField(
@@ -584,49 +738,89 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                           const SizedBox(height: 20),
 
-                          // Terms and Conditions Widget Block
+                          // Terms and Conditions Widget Block — the checkbox
+                          // is disabled and greyed out until the user has
+                          // actually reached the bottom of both required
+                          // documents via PolicyViewerScreen (item 2/3);
+                          // tapping the link text is what opens that screen,
+                          // not an alternate route to skip it. The "(tap to
+                          // read)" hint and the "please read first" line are
+                          // both held back until the user actually tries to
+                          // proceed without having read them yet
+                          // (_showPolicyHint, set in _proceedToOtp) — showing
+                          // either one unconditionally from the very start
+                          // of the form reads as a warning before the user
+                          // has done anything wrong.
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Checkbox(
-                                    value: _agreed,
-                                    activeColor: AppColors.primary,
-                                    side: BorderSide(color: _agreedError ? Colors.red : Colors.grey.shade400, width: 1.5),
-                                    onChanged: (v) {
-                                      setState(() {
-                                        _agreed = v ?? false;
-                                        if (_agreed) _agreedError = false;
-                                      });
-                                    },
-                                    visualDensity: VisualDensity.compact,
+                                  SizedBox(
+                                    width: _checkboxLeadWidth,
+                                    child: Checkbox(
+                                      value: _agreed,
+                                      activeColor: AppColors.primary,
+                                      side: BorderSide(color: _agreedError ? Colors.red : Colors.grey.shade400, width: 1.5),
+                                      onChanged: !_hasReadPolicies ? null : (v) {
+                                        setState(() {
+                                          _agreed = v ?? false;
+                                          if (_agreed) _agreedError = false;
+                                        });
+                                      },
+                                      visualDensity: VisualDensity.compact,
+                                    ),
                                   ),
                                   Expanded(
                                     child: GestureDetector(
                                       onTap: () {
+                                        if (!_hasReadPolicies) {
+                                          _openPolicyViewer();
+                                          return;
+                                        }
                                         setState(() {
                                           _agreed = !_agreed;
                                           if (_agreed) _agreedError = false;
                                         });
                                       },
-                                      child: const Text(
-                                        'I agree to the Terms of Service and Privacy Policy',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppColors.textMuted,
-                                          height: 1.4,
+                                      child: Text.rich(TextSpan(children: [
+                                        const TextSpan(
+                                          text: 'I agree to the ',
+                                          style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.4),
                                         ),
-                                      ),
+                                        TextSpan(
+                                          text: 'Terms of Service and Privacy Policy',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            height: 1.4,
+                                            color: AppColors.primary,
+                                            fontWeight: FontWeight.w700,
+                                            decoration: _hasReadPolicies ? null : TextDecoration.underline,
+                                          ),
+                                        ),
+                                        if (!_hasReadPolicies && _showPolicyHint)
+                                          const TextSpan(
+                                            text: '  (tap to read)',
+                                            style: TextStyle(fontSize: 11, color: AppColors.textMuted, fontStyle: FontStyle.italic),
+                                          ),
+                                      ])),
                                     ),
                                   ),
                                 ],
                               ),
+                              if (!_hasReadPolicies && _showPolicyHint)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: _checkboxLeadWidth, top: 2),
+                                  child: const Text(
+                                    'Please read the Terms & Agreements and Privacy Policy first.',
+                                    style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                                  ),
+                                ),
                               if (_agreedError)
-                                const Padding(
-                                  padding: EdgeInsets.only(left: 12, top: 4),
-                                  child: Text(
+                                Padding(
+                                  padding: const EdgeInsets.only(left: _checkboxLeadWidth, top: 4),
+                                  child: const Text(
                                     'Please accept the terms and conditions.',
                                     style: TextStyle(color: Colors.red, fontSize: 12),
                                   ),
@@ -813,6 +1007,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       ),
     ]);
+  }
+
+  // Live checklist (item 5) — each row flips satisfied/unsatisfied as the
+  // user types, driven by _updatePasswordChecklist's listener on _passCtrl.
+  Widget _passwordChecklist() {
+    Widget row(bool met, String label) => Padding(
+          padding: const EdgeInsets.only(bottom: 3),
+          child: Row(children: [
+            Icon(
+              met ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 14,
+              color: met ? const Color(0xFF16A34A) : Colors.grey.shade400,
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(
+                fontSize: 11.5,
+                color: met ? const Color(0xFF16A34A) : AppColors.textMuted,
+                fontWeight: met ? FontWeight.w600 : FontWeight.w400)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        row(_pwHasLength, 'At least 8 characters'),
+        row(_pwHasUpper, 'One uppercase letter'),
+        row(_pwHasLower, 'One lowercase letter'),
+        row(_pwHasNumber, 'One number'),
+        row(_pwHasSpecial, 'One special character'),
+      ]),
+    );
   }
 
   Widget _passField(

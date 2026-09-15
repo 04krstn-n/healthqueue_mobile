@@ -803,6 +803,29 @@ class AppState extends ChangeNotifier {
   // This calls the server first and only updates local state on
   // confirmed success, returning the result so the screen can show a
   // real success/error message — matching how cancelQueue already works.
+  // Check-in (item 5) — the only action that turns a booked appointment
+  // into a live queue entry server-side. Mirrors cancelAppointment's
+  // "call server first, only update local state on confirmed success"
+  // pattern rather than optimistically flipping status client-side.
+  Future<String?> checkInAppointment(String id) async {
+    try {
+      await ApiService.checkInAppointment(id);
+      final idx = _appointments.indexWhere((a) => a.id == id);
+      if (idx != -1) {
+        _appointments[idx] = _appointments[idx].copyWith(status: AppointmentStatus.arrived);
+        _appointmentsView = null;
+        _upcomingView = null;
+        _pastView = null;
+        _prevApptStatuses[id] = AppointmentStatus.arrived.name;
+        notifyListeners();
+      }
+      fetchQueueStatus();
+      return null; // null == success
+    } catch (e) {
+      return e.toString().replaceFirst('Exception: ', '');
+    }
+  }
+
   Future<bool> cancelAppointment(String id) async {
     final ok = await ApiService.cancelAppointment(id);
     if (ok) {
@@ -1342,6 +1365,7 @@ class AppState extends ChangeNotifier {
         text: text,
         isUser: false,
         isStaff: true,
+        staffName: staffName,
         timestamp: DateTime.now(),
       ),
     );

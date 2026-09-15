@@ -23,6 +23,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
 
+  // Inline format errors (item 6/7) — checked client-side before ever
+  // calling the server, same regexes register_screen.dart uses so the two
+  // screens never disagree about what counts as a valid phone/email.
+  String? _identifierError;
+  String? _passwordError;
+  final _phoneRegex = RegExp(r'^(09|\+639)\d{9}$');
+  final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -62,12 +70,30 @@ class _LoginScreenState extends State<LoginScreen> {
         : _phoneCtrl.text.trim();
     final pass = _passCtrl.text;
 
-    if (identifier.isEmpty || pass.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please complete all fields.')));
+    // Field-level format validation (item 6/7) — checked before touching
+    // the network at all, mirroring register_screen's exact regexes so
+    // "valid on register" and "valid on login" never disagree.
+    String? identifierError;
+    String? passwordError;
+    if (identifier.isEmpty) {
+      identifierError = _isEmail ? 'Please enter your email address.' : 'Please enter your phone number.';
+    } else if (_isEmail && !_emailRegex.hasMatch(identifier)) {
+      identifierError = 'Invalid email address. Please enter a valid email.';
+    } else if (!_isEmail && !_phoneRegex.hasMatch(identifier)) {
+      identifierError = 'Invalid mobile number. Please enter a valid mobile number.';
+    }
+    if (pass.isEmpty) passwordError = 'Please enter your password.';
+
+    if (identifierError != null || passwordError != null) {
+      setState(() {
+        _identifierError = identifierError;
+        _passwordError = passwordError;
+      });
       return;
     }
+    setState(() { _identifierError = null; _passwordError = null; });
 
+    if (_isLoading) return; // guards against a double-tap firing two requests
     setState(() => _isLoading = true);
     try {
       await context.read<AppState>().login(
@@ -85,8 +111,15 @@ class _LoginScreenState extends State<LoginScreen> {
       ));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      // The server already maps its own failure cases to clean, specific
+      // messages (account not found, wrong password, deactivated account —
+      // see authController.login) rather than raw HTTP/Mongo errors, so
+      // there's nothing to re-translate here — just surface it. A network-
+      // level failure (no server response at all) falls through to
+      // whatever ApiService/http itself throws, which reads as a plain
+      // "connection failed"-style message rather than a stack trace.
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -187,8 +220,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       // Toggle
                       PillToggle(
                         isEmail: _isEmail,
-                        onEmail: () => setState(() => _isEmail = true),
-                        onPhone: () => setState(() => _isEmail = false),
+                        onEmail: () => setState(() { _isEmail = true; _identifierError = null; }),
+                        onPhone: () => setState(() { _isEmail = false; _identifierError = null; }),
                       ),
                       const SizedBox(height: 16),
 
@@ -200,6 +233,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         keyboardType: _isEmail
                             ? TextInputType.emailAddress
                             : TextInputType.phone,
+                        onChanged: (_) {
+                          if (_identifierError != null) setState(() => _identifierError = null);
+                        },
                         decoration: _inputDeco(
                           hint: _isEmail
                               ? 'you@email.com'
@@ -207,6 +243,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           icon: _isEmail
                               ? Icons.mail_outline
                               : Icons.phone_outlined,
+                          errorText: _identifierError,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -218,9 +255,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         controller: _passCtrl,
                         obscureText: !_showPass,
                         onSubmitted: (_) => _signIn(),
+                        onChanged: (_) {
+                          if (_passwordError != null) setState(() => _passwordError = null);
+                        },
                         decoration: _inputDeco(
                           hint: '••••••••',
                           icon: Icons.lock_outline,
+                          errorText: _passwordError,
                           suffix: IconButton(
                             icon: Icon(
                               _showPass
@@ -313,6 +354,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required String hint,
     required IconData icon,
     Widget? suffix,
+    String? errorText,
   }) =>
       InputDecoration(
         hintText: hint,
@@ -323,6 +365,8 @@ class _LoginScreenState extends State<LoginScreen> {
         fillColor: AppColors.fieldFill,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 14, vertical: 14),
+        errorText: errorText,
+        errorStyle: const TextStyle(color: Colors.red, fontSize: 11.5),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none),
@@ -332,5 +376,11 @@ class _LoginScreenState extends State<LoginScreen> {
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
+        errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.red, width: 1.0)),
+        focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Colors.red, width: 1.5)),
       );
 }

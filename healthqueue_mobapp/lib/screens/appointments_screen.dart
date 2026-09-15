@@ -226,6 +226,16 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     ));
   }
 
+  Future<void> _checkIn(String id) async {
+    final error = await context.read<AppState>().checkInAppointment(id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(error ?? 'Checked in! You have been added to the active queue.'),
+      backgroundColor: error == null ? const Color(0xFF16A34A) : Colors.red,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     // select(), not watch() — same reasoning as Dashboard. This tab was
@@ -277,12 +287,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
                 _ApptList(
                   appointments: upcoming,
                   onCancel: _cancel,
+                  onCheckIn: _checkIn,
                   emptyMsg: 'No upcoming appointments.\nTap + to book one.',
                   showCancel: true,
                 ),
                 _ApptList(
                   appointments: past,
                   onCancel: null,
+                  onCheckIn: null,
                   emptyMsg: 'No past appointments.',
                   showCancel: false,
                 ),
@@ -302,12 +314,14 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 class _ApptList extends StatelessWidget {
   final List<apt.Appointment> appointments;
   final void Function(String)? onCancel;
+  final void Function(String)? onCheckIn;
   final String emptyMsg;
   final bool showCancel;
 
   const _ApptList({
     required this.appointments,
     required this.onCancel,
+    this.onCheckIn,
     required this.emptyMsg,
     required this.showCancel,
   });
@@ -418,7 +432,31 @@ class _ApptList extends StatelessWidget {
                         style: const TextStyle(fontSize: 12, color: AppColors.textMuted))),
                     ]),
                   ],
-                  if (showCancel && onCancel != null && a.isUpcoming) ...[
+                  if (showCancel && (a.status == apt.AppointmentStatus.confirmed) && onCheckIn != null) ...[
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => onCheckIn!(a.id),
+                          icon: const Icon(Icons.how_to_reg_outlined, size: 16),
+                          label: const Text('Check In', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ),
+                      if (onCancel != null && a.isUpcoming) ...[
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => onCancel!(a.id),
+                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                          child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                        ),
+                      ],
+                    ]),
+                  ] else if (showCancel && onCancel != null && a.isUpcoming) ...[
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,

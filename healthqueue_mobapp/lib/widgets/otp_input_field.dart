@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/constants/app_colors.dart';
@@ -12,23 +13,32 @@ class OtpInputField extends StatefulWidget {
   final TextEditingController controller;
   final ValueChanged<String>? onCompleted;
   final ValueChanged<String>? onChanged;
+  // When true, boxes render with a red border — set by the parent right
+  // after a wrong-code response comes back from the server, so the error
+  // is visible on the input itself (item 1: "clearly show an error when
+  // the OTP is incorrect"), not only in a separate dialog the user has to
+  // dismiss before they can even see which field to fix.
+  final bool hasError;
 
   const OtpInputField({
     super.key,
     required this.controller,
     this.onCompleted,
     this.onChanged,
+    this.hasError = false,
   });
 
   @override
   State<OtpInputField> createState() => _OtpInputFieldState();
 }
 
-class _OtpInputFieldState extends State<OtpInputField> {
+class _OtpInputFieldState extends State<OtpInputField>
+    with SingleTickerProviderStateMixin {
   static const _length = 6;
   late final List<TextEditingController> _boxCtrls;
   late final List<FocusNode> _boxNodes;
   bool _syncingFromController = false;
+  late final AnimationController _shakeCtrl;
 
   @override
   void initState() {
@@ -37,6 +47,17 @@ class _OtpInputFieldState extends State<OtpInputField> {
     _boxNodes = List.generate(_length, (_) => FocusNode());
     widget.controller.addListener(_syncFromExternalController);
     _syncFromExternalController();
+    _shakeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+  }
+
+  @override
+  void didUpdateWidget(OtpInputField old) {
+    super.didUpdateWidget(old);
+    // Rising edge only — shakes once per new error, not on every rebuild
+    // while hasError happens to still be true.
+    if (widget.hasError && !old.hasError) {
+      _shakeCtrl.forward(from: 0);
+    }
   }
 
   @override
@@ -48,6 +69,7 @@ class _OtpInputFieldState extends State<OtpInputField> {
     for (final n in _boxNodes) {
       n.dispose();
     }
+    _shakeCtrl.dispose();
     super.dispose();
   }
 
@@ -114,51 +136,72 @@ class _OtpInputFieldState extends State<OtpInputField> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: List.generate(_length, (i) {
-        return SizedBox(
-          width: 46,
-          height: 56,
-          child: KeyboardListener(
-            focusNode: FocusNode(skipTraversal: true),
-            onKeyEvent: (event) {
-              if (event is KeyDownEvent &&
-                  event.logicalKey == LogicalKeyboardKey.backspace) {
-                _onBackspace(i);
-              }
-            },
-            child: TextField(
-              controller: _boxCtrls[i],
-              focusNode: _boxNodes[i],
-              keyboardType: TextInputType.number,
-              textAlign: TextAlign.center,
-              maxLength: _length, // allows a full pasted code to land in one box (see _onBoxChanged)
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-              decoration: InputDecoration(
-                counterText: '',
-                filled: true,
-                fillColor: const Color(0xFFF6F7FB),
-                contentPadding: EdgeInsets.zero,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+    return AnimatedBuilder(
+      animation: _shakeCtrl,
+      builder: (context, child) {
+        // Decaying horizontal shake: a sine wave whose amplitude falls to
+        // zero by the end of the animation, rather than a hard cutoff.
+        final t = _shakeCtrl.value;
+        final amplitude = 8 * (1 - t);
+        final offset = math.sin(t * 4 * math.pi) * amplitude;
+        return Transform.translate(offset: Offset(offset, 0), child: child);
+      },
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: List.generate(_length, (i) {
+          return SizedBox(
+            width: 46,
+            height: 56,
+            child: KeyboardListener(
+              focusNode: FocusNode(skipTraversal: true),
+              onKeyEvent: (event) {
+                if (event is KeyDownEvent &&
+                    event.logicalKey == LogicalKeyboardKey.backspace) {
+                  _onBackspace(i);
+                }
+              },
+              child: TextField(
+                controller: _boxCtrls[i],
+                focusNode: _boxNodes[i],
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                maxLength: _length, // allows a full pasted code to land in one box (see _onBoxChanged)
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  color: widget.hasError ? const Color(0xFFDC2626) : null,
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border),
+                decoration: InputDecoration(
+                  counterText: '',
+                  filled: true,
+                  fillColor: widget.hasError
+                      ? const Color(0xFFFEF2F2)
+                      : const Color(0xFFF6F7FB),
+                  contentPadding: EdgeInsets.zero,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                        color: widget.hasError ? const Color(0xFFDC2626) : AppColors.border,
+                        width: widget.hasError ? 1.4 : 1),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                        color: widget.hasError ? const Color(0xFFDC2626) : AppColors.primary,
+                        width: 1.5),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-                ),
+                onChanged: (v) => _onBoxChanged(i, v),
               ),
-              onChanged: (v) => _onBoxChanged(i, v),
             ),
-          ),
-        );
-      }),
+          );
+        }),
+      ),
     );
   }
 }

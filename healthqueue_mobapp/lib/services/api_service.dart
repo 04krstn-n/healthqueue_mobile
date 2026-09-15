@@ -699,6 +699,20 @@ class ApiService {
     return res.statusCode >= 200 && res.statusCode < 300;
   }
 
+  // PUT check-in — the ONLY moment a booked appointment becomes a live
+  // queue entry (see server appointmentController.checkInAppointment /
+  // item 5). NOT idempotent/retried automatically: calling it twice would
+  // otherwise risk creating a second queue entry, so this uses a single
+  // plain request rather than _withRetry.
+  static Future<Map<String, dynamic>> checkInAppointment(String id) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/appointments/$id/check-in'),
+      headers: await _authHeaders(),
+    );
+    _assertOk(res, 'Failed to check in.');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   static Future<List<dynamic>> getAvailableSlots({
     required String clinicId,
     required String date,
