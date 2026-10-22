@@ -409,144 +409,160 @@ class _RegisterScreenState extends State<RegisterScreen> {
   // ── OTP screen ─────────────────────────────────────────────────────────────
   Widget _buildOtpScreen(bool isLoading) {
     final otpComplete = _otpCtrl.text.trim().length == 6;
+    // Matches forgot_password_screen.dart's OTP step visual pattern —
+    // gradient background, a big icon + title floating above a white
+    // elevated card, left-aligned content inside the card, "Back" link
+    // below instead of an app bar. The old layout here was a plain white
+    // full-page Scaffold with an AppBar; this keeps this screen's own
+    // functional additions (error shake, disabled-until-complete button,
+    // success state) but adopts the cleaner shared chrome.
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white, elevation: 0,
-        foregroundColor: AppColors.textDark,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            _otpTimer?.cancel();
-            setState(() => _otpStep = false);
-          },
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [AppColors.bgTop, AppColors.bgBottom],
+          ),
         ),
-      ),
-      // Centered both visually and with spacing (item 1) — the old layout
-      // was top-left aligned starting right under the app bar with no
-      // vertical centering at all.
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: .1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _otpSuccess ? Icons.check_circle : Icons.sms_outlined,
-                      color: _otpSuccess ? const Color(0xFF16A34A) : AppColors.primary,
-                      size: 32,
-                    ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(children: [
+                  Icon(
+                    _otpSuccess ? Icons.check_circle_rounded : Icons.sms_rounded,
+                    color: Colors.white,
+                    size: 56,
                   ),
-                  const SizedBox(height: 20),
-                  const Text('Enter OTP',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 14),
                   Text(
-                    'Enter the verification code sent to your mobile number.\n$_pendingPhone',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 13.5, color: AppColors.textMuted, height: 1.5),
+                    _otpSuccess ? 'Verified!' : 'Enter OTP',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900),
                   ),
-                  const SizedBox(height: 28),
-
-                  // Expiry countdown
-                  Builder(builder: (_) {
-                    final left = _otpSecondsLeft;
-                    return Column(children: [
-                      Text(
-                        _otpExpired ? 'OTP has expired'
-                            : 'Expires in ${_formatCountdown(left)}',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                          color: _otpExpired ? Colors.red
-                              : left < 30 ? Colors.orange : const Color(0xFF16A34A)),
+                  const SizedBox(height: 32),
+                  RepaintBoundary(
+                    // Same fix as forgot_password_screen.dart/login_screen.dart:
+                    // isolates the shadowed card's expensive blur from
+                    // repainting every frame of the keyboard's open/close
+                    // animation.
+                    child: Container(
+                      padding: const EdgeInsets.all(24),
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [BoxShadow(
+                            blurRadius: 20, color: Colors.black.withValues(alpha: .1))],
                       ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(2),
-                        child: SizedBox(
-                          width: 220,
-                          child: LinearProgressIndicator(
-                            value: left / _otpValidSeconds,
-                            backgroundColor: Colors.grey.shade200,
-                            color: _otpExpired ? Colors.red
-                                : left < 30 ? Colors.orange : AppColors.primary,
-                            minHeight: 3,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Enter the verification code sent to your mobile number.\n$_pendingPhone',
+                            style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.5),
                           ),
-                        ),
-                      ),
-                    ]);
-                  }),
-                  const SizedBox(height: 24),
+                          const SizedBox(height: 20),
 
-                  OtpInputField(
-                    controller: _otpCtrl,
-                    hasError: _otpHasError,
-                    onChanged: (_) {
-                      if (_otpHasError) setState(() => _otpHasError = false);
-                      // Rebuilds to re-evaluate `otpComplete` for the
-                      // Verify button's enabled state (item 1: "prevent
-                      // submission when the OTP is incomplete" — now
-                      // reflected as a disabled button, not just a
-                      // post-tap validation message).
-                      setState(() {});
-                    },
-                    onCompleted: (_) {
-                      if (!isLoading && !_otpExpired) _verifyAndRegister();
-                    },
-                  ),
-                  if (_otpHasError) ...[
-                    const SizedBox(height: 10),
-                    const Text('Incorrect code. Please try again.',
-                        style: TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
-                  ],
-                  if (_otpSuccess) ...[
-                    const SizedBox(height: 10),
-                    const Text('Verified! Setting up your account…',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF16A34A), fontWeight: FontWeight.w700)),
-                  ],
-                  const SizedBox(height: 24),
+                          // Expiry countdown
+                          Builder(builder: (_) {
+                            final left = _otpSecondsLeft;
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _otpExpired ? 'OTP has expired'
+                                      : 'Expires in ${_formatCountdown(left)}',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+                                    color: _otpExpired ? Colors.red
+                                        : left < 30 ? Colors.orange : Colors.green),
+                                ),
+                                const SizedBox(height: 4),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(2),
+                                  child: LinearProgressIndicator(
+                                    value: left / _otpValidSeconds,
+                                    backgroundColor: Colors.grey.shade200,
+                                    color: _otpExpired ? Colors.red
+                                        : left < 30 ? Colors.orange : AppColors.primary,
+                                    minHeight: 3,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }),
+                          const SizedBox(height: 18),
 
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: (isLoading || !otpComplete || _otpExpired || _otpSuccess)
-                          ? null : _verifyAndRegister,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.grey.shade300,
-                        minimumSize: const Size.fromHeight(52),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
+                          OtpInputField(
+                            controller: _otpCtrl,
+                            hasError: _otpHasError,
+                            onChanged: (_) {
+                              if (_otpHasError) setState(() => _otpHasError = false);
+                              // Rebuilds to re-evaluate `otpComplete` for
+                              // the Verify button's enabled state.
+                              setState(() {});
+                            },
+                            onCompleted: (_) {
+                              if (!isLoading && !_otpExpired) _verifyAndRegister();
+                            },
+                          ),
+                          if (_otpHasError) ...[
+                            const SizedBox(height: 8),
+                            const Text('Incorrect code. Please try again.',
+                                style: TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
+                          ],
+                          if (_otpSuccess) ...[
+                            const SizedBox(height: 8),
+                            const Text('Setting up your account…',
+                                style: TextStyle(fontSize: 12, color: Color(0xFF16A34A), fontWeight: FontWeight.w700)),
+                          ],
+                          const SizedBox(height: 20),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: (isLoading || !otpComplete || _otpExpired || _otpSuccess)
+                                  ? null : _verifyAndRegister,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                                disabledBackgroundColor: Colors.grey.shade300,
+                                minimumSize: const Size.fromHeight(52),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                              child: isLoading
+                                  ? const SizedBox(width: 20, height: 20,
+                                      child: CircularProgressIndicator(
+                                          color: Colors.white, strokeWidth: 2))
+                                  : Text(_otpSuccess ? 'Verified' : 'Verify & Create Account',
+                                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Center(child: _otpResendCooldown > 0
+                              ? Text('Resend in ${_otpResendCooldown}s',
+                                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
+                              : TextButton(
+                                  onPressed: _resendOtp,
+                                  child: const Text('Resend OTP',
+                                      style: TextStyle(fontWeight: FontWeight.w700)))),
+                        ],
                       ),
-                      child: isLoading
-                          ? const SizedBox(width: 20, height: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2))
-                          : Text(_otpSuccess ? 'Verified' : 'Verify & Create Account',
-                              style: const TextStyle(fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  _otpResendCooldown > 0
-                      ? Text('Resend in ${_otpResendCooldown}s',
-                          style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
-                      : TextButton(
-                          onPressed: _resendOtp,
-                          child: const Text('Resend OTP',
-                              style: TextStyle(fontWeight: FontWeight.w700))),
-                ],
+                  TextButton(
+                    onPressed: () {
+                      _otpTimer?.cancel();
+                      setState(() => _otpStep = false);
+                    },
+                    child: const Text('Back',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  ),
+                ]),
               ),
             ),
           ),

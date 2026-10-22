@@ -1006,18 +1006,6 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(20),
-                    // Was: [_buildStep1(), _buildStep2(), _buildStep3()][_step - 1]
-                    // A Dart list literal evaluates every element before
-                    // indexing into it — so that line was calling all
-                    // three _buildStepN() methods, constructing all three
-                    // steps' entire widget trees, on EVERY rebuild,
-                    // regardless of which one was actually shown. Two
-                    // thirds of that work was always thrown away. This is
-                    // exactly the "high Build time, near-zero Raster
-                    // time" pattern the DevTools trace flagged repeatedly
-                    // on this screen — pure wasted Dart-side construction,
-                    // not a rendering/GPU cost. A real switch only builds
-                    // the step that's actually needed.
                     child: switch (_step) {
                       1 => _buildStep1(),
                       2 => _buildStep2(),

@@ -234,14 +234,9 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
       case 'denied':
       case 'unavailable':
       default:
-        // 'denied' — just ask again, the system dialog handles it.
-        // 'unavailable' — permission's fine, just retry the fix (moving
-        // near a window, waiting for GPS to warm up, etc. helps here).
         await _retryLocation();
         return;
     }
-    // Give the patient a moment to flip the setting before we re-check;
-    // didChangeAppLifecycleState also retries automatically on resume.
     await Future.delayed(const Duration(milliseconds: 500));
     await _retryLocation();
   }
@@ -341,12 +336,6 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
                 myLocationEnabled:      false,
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled:    false,
-                // This screen needs to stay interactive (pan/zoom/tap
-                // markers), so no liteMode here — but compass, rotate,
-                // tilt, and indoor layers are all things this app never
-                // uses and each is one more continuously-available
-                // gesture recognizer / render layer for the SDK to
-                // maintain while the screen is open.
                 compassEnabled:         false,
                 rotateGesturesEnabled:  false,
                 tiltGesturesEnabled:    false,
@@ -502,15 +491,6 @@ class _ClinicMapScreenState extends State<ClinicMapScreen> with WidgetsBindingOb
                                 Expanded(child: ElevatedButton(
                                   onPressed: () => Navigator.pushNamed(
                                       context, AppRoutes.joinQueue,
-                                    // Was _selected?.clinic — Clinic has no
-                                    // `.clinic` field at all, so this could
-                                    // never correctly resolve to this card's
-                                    // clinic. `c` is the actual clinic this
-                                    // specific card represents (the loop
-                                    // variable this whole card is built
-                                    // from), which is what should be passed
-                                    // through to Join Queue regardless of
-                                    // whatever `_selected` currently holds.
                                     arguments: c),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,

@@ -532,15 +532,7 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
     final ahead = _toInt(_inQueue ? _status!['peopleAhead'] : 0);
     final wait = _toInt(_inQueue ? _status!['estimatedWaitTime'] : 0);
     final qStatus = entry?['status']?.toString() ?? '';
-    // Was: qStatus == 'serving' — one step too late; see queue_models.dart
-    // QueueEntry.isCalled for why. The server's real "called" status is
-    // literally the string 'called'.
     final called = qStatus == 'called';
-    // Was: _status?['graceRemaining'] — the server never sends a
-    // top-level "graceRemaining" minutes field; it sends the absolute
-    // timestamp entry.gracePeriodExpiresAt (see queueController.callPatient),
-    // so this always read null and the countdown never actually worked.
-    // Compute remaining minutes client-side from that timestamp instead.
     final graceExpiresRaw = entry?['gracePeriodExpiresAt']?.toString();
     final graceExpiresAt =
         graceExpiresRaw == null ? null : DateTime.tryParse(graceExpiresRaw);

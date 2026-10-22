@@ -154,13 +154,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: Image.asset(
                           'assets/icon/healthqueue_logo.png',
                           fit: BoxFit.contain,
-                          // Without cacheWidth, Flutter decodes the source
-                          // PNG at its full native resolution even though
-                          // it's only ever displayed at 52x52 logical
-                          // pixels here — if the source asset is large,
-                          // that wastes a lot of decoded-bitmap memory for
-                          // no visual benefit. 150 covers up to ~3x pixel
-                          // density at this display size.
                           cacheWidth: 150,
                         ),
                       ),
@@ -178,17 +171,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Card
                   RepaintBoundary(
-                    // The BoxShadow below needs an expensive GPU blur pass
-                    // to render. Without this boundary, every frame of the
-                    // keyboard's open/close animation (~20-30 frames) forces
-                    // that blur to be redone from scratch, even though the
-                    // card's own content never changes during that
-                    // animation — only the keyboard is moving. That
-                    // mismatch is exactly what showed up as huge frame-time
-                    // spikes precisely at the keyboard-open/close moments
-                    // in on-device GPU profiling. RepaintBoundary caches
-                    // this subtree as its own compositing layer so it's
-                    // only actually repainted when ITS content changes.
                     child: Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(

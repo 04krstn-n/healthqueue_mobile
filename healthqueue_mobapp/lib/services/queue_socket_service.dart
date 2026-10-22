@@ -1,5 +1,6 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../config/api_config.dart';
+import 'api_service.dart';
 
 /// Wraps the Socket.io connection to hq-server for live queue-status pushes.
 ///
@@ -33,6 +34,7 @@ class QueueSocketService {
 
   IO.Socket? _socket;
   String? _joinedId;
+  bool _connecting = false;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -45,19 +47,27 @@ class QueueSocketService {
   /// room (`user_<id>`) for account-level pushes like a patient-type
   /// approval, which aren't tied to any one clinic. [eventNames] lets
   /// that second use reuse this same wrapper instead of a duplicate class.
-  void connect(
+  Future<void> connect(
     String id, {
     required void Function(dynamic data) onUpdated,
     void Function()? onConnected,
     void Function()? onDisconnected,
     String joinEvent = 'join_clinic',
     List<String> eventNames = _queueEventNames,
-  }) {
-    if (_socket != null && _joinedId == id && _socket!.connected) {
+  }) async {
+    if (_joinedId == id && (_connecting || (_socket != null && _socket!.connected))) {
       return;
     }
     disconnect();
     _joinedId = id;
+    _connecting = true;
+
+    // The server only lets an authenticated socket join a room (see
+    // web-server socket/socketSecurity.js), so send the JWT with the handshake.
+    final token = await ApiService.getToken();
+    _connecting = false;
+    // A newer connect()/disconnect() may have run while the token was read.
+    if (_joinedId != id) return;
 
     // ApiConfig.baseUrl includes a trailing /api for this app's REST calls
     // (see api_config.dart) — Socket.io needs the bare server origin.
@@ -68,6 +78,9 @@ class QueueSocketService {
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
+          .setExtraHeaders({
+            if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+          })
           // socket_io_client's default is to retry a failed/dropped
           // connection FOREVER (roughly every 1-5s, no cap). If the
           // server is ever unreachable for the whole session (wrong
@@ -102,5 +115,6 @@ class QueueSocketService {
     _socket?.dispose();
     _socket = null;
     _joinedId = null;
+    _connecting = false;
   }
 }

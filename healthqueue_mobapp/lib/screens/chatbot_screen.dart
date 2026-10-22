@@ -410,31 +410,17 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
 @override
   Widget build(BuildContext context) {
-    // select() on chatVersion (a cheap int), not watch<AppState>() on the
-    // whole object. This screen previously rebuilt on every AppState
-    // change — a queue ping, an appointment poll, anything — even while
-    // backgrounded (IndexedStack keeps it mounted). _chatMessages is
-    // mutated in place (.add()) rather than reassigned, so unlike
-    // appointments it can't be cached by reference; chatVersion is a
-    // counter AppState bumps on every real chat mutation, giving the same
-    // "only rebuild when this actually changed" effect.
     context.select<AppState, int>((s) => s.chatVersion);
     final appState = context.read<AppState>();
     final messages = appState.messages;
-    // Selecting on the computed String (not the raw currentQueue/
-    // upcomingAppointments objects) means this correctly rebuilds only
-    // when the displayed clinic name actually changes — String has real
-    // value equality, so this avoids the same "fresh object every call"
-    // trap those getters have without needing to touch them again here.
     final clinicChipLabel =
         context.select<AppState, String?>((s) => _effectiveClinicName(s)) ??
             'Select clinic';
 
     return SafeArea(
-      bottom: false, // Prevents interfering with the keyboard and bottom input bar
+      bottom: false, 
       child: Column(
         children: [
-          // ── Header ─────────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             decoration: const BoxDecoration(
@@ -512,7 +498,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
             ),
           ),
 
-          // ── Messages ───────────────────────────────────────────────────────
           Expanded(
             child: ListView.builder(
               controller: _scrollCtrl,
@@ -593,10 +578,6 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
           // ── Input bar ──────────────────────────────────────────────────────
           RepaintBoundary(
-            // This bar is visible the whole time the patient is typing —
-            // exactly the keyboard-animation-jank pattern found on the
-            // login screen, but worse here since it's on screen for the
-            // entire chat session, not just briefly at sign-in.
             child: Container(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
             decoration: BoxDecoration(
