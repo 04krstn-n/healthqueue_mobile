@@ -328,6 +328,7 @@ class ApiService {
   static Future<Map<String, dynamic>> joinQueue({
     required String clinicId,
     required String serviceName,
+    List<String>? serviceNames,
     String? notes,
   }) async {
     final res = await _once(() async => http.post(
@@ -336,6 +337,8 @@ class ApiService {
           body: jsonEncode({
             'clinicId': clinicId,
             'serviceName': serviceName,
+            if (serviceNames != null && serviceNames.isNotEmpty)
+              'serviceNames': serviceNames,
             if (notes != null && notes.isNotEmpty) 'notes': notes,
           }),
         ));

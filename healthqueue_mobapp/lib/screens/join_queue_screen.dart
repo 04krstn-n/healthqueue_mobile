@@ -32,7 +32,8 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
   List<Clinic> _clinics = [];
   Clinic? _clinic;
-  String? _service;
+  String? _service; // display text: selected services joined with ", "
+  final List<String> _services = []; // every selected service (multi-select)
 
   PatientType _pType = PatientType.regular;
 
@@ -163,7 +164,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
     if (_step == 2) {
       if (_service == null || _service!.trim().isEmpty) {
-        _showError('Please select a service.');
+        _showError('Please select at least one service.');
         return;
       }
 
@@ -343,7 +344,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
     }
 
     if (_service == null || _service!.trim().isEmpty) {
-      _showError('Please select a service.');
+      _showError('Please select at least one service.');
       return;
     }
 
@@ -362,6 +363,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
       final res = await ApiService.joinQueue(
         clinicId: _clinic!.id,
         serviceName: _service!,
+        serviceNames: List<String>.from(_services),
         notes:
             _notesCtrl.text.trim().isNotEmpty ? _notesCtrl.text.trim() : null,
       );
@@ -1092,6 +1094,7 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
                       setState(() {
                         _clinic = c;
                         _service = null;
+                        _services.clear();
                       });
                     },
               child: AnimatedContainer(
@@ -1314,12 +1317,18 @@ class _JoinQueueScreenState extends State<JoinQueueScreen> {
 
             final duration = _safeInt(s['durationMinutes']);
 
-            final selected = _service == name;
+            final selected = _services.contains(name);
 
             return GestureDetector(
               onTap: () {
                 setState(() {
-                  _service = name;
+                  // Multi-select: tap again to deselect.
+                  if (_services.contains(name)) {
+                    _services.remove(name);
+                  } else {
+                    _services.add(name);
+                  }
+                  _service = _services.isEmpty ? null : _services.join(', ');
                 });
               },
               child: AnimatedContainer(

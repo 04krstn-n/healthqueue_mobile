@@ -768,7 +768,7 @@ class _Sheet extends StatelessWidget {
       );
 }
 
-class _Field extends StatelessWidget {
+class _Field extends StatefulWidget {
   final TextEditingController ctrl;
   final String label;
   final IconData icon;
@@ -783,16 +783,34 @@ class _Field extends StatelessWidget {
       this.obscure = false,
       this.maxLines = 1});
   @override
+  State<_Field> createState() => _FieldState();
+}
+
+class _FieldState extends State<_Field> {
+  bool _hidden = true; // only used when widget.obscure (password fields)
+
+  @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: TextField(
-          controller: ctrl,
-          keyboardType: type,
-          obscureText: obscure,
-          maxLines: obscure ? 1 : maxLines,
+          controller: widget.ctrl,
+          keyboardType: widget.type,
+          obscureText: widget.obscure && _hidden,
+          maxLines: widget.obscure ? 1 : widget.maxLines,
           decoration: InputDecoration(
-            labelText: label,
-            prefixIcon: Icon(icon, color: AppColors.primary, size: 20),
+            labelText: widget.label,
+            prefixIcon: Icon(widget.icon, color: AppColors.primary, size: 20),
+            suffixIcon: widget.obscure
+                ? IconButton(
+                    tooltip: _hidden ? 'Show password' : 'Hide password',
+                    icon: Icon(
+                        _hidden
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        size: 20),
+                    onPressed: () => setState(() => _hidden = !_hidden),
+                  )
+                : null,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: AppColors.border)),

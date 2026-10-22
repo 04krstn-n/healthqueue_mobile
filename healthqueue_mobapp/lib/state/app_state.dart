@@ -900,6 +900,11 @@ class AppState extends ChangeNotifier {
   ───────────────────────────────────────────────────────── */
 
   QueueEntry? _currentQueue;
+  // Multi-service visit: the patient's OTHER active lines (one entry per
+  // service). The primary line is _currentQueue; these are the rest, each with
+  // its own ticket, position and onHold/holdReason from the server.
+  List<Map<String, dynamic>> _otherLines = [];
+  List<Map<String, dynamic>> get otherQueueLines => _otherLines;
   bool _queueLoading = false;
   // Only trust a freshly-joined local queue for a short grace period —
   // long enough for the very next poll to confirm it server-side, but not
@@ -1106,6 +1111,7 @@ class AppState extends ChangeNotifier {
             DateTime.now().difference(_localQueueSetAt!) < const Duration(seconds: 8);
         if (!withinGracePeriod) {
           _currentQueue = null;
+          _otherLines = [];
           // No active queue left to watch — release the socket connection
           // instead of leaving it idly joined to a clinic room.
           _queueSocket.disconnect();
@@ -1114,6 +1120,15 @@ class AppState extends ChangeNotifier {
       }
 
       final e = Map<String, dynamic>.from(rawEntry);
+
+      final allLines = data['entries'];
+      _otherLines = allLines is List
+          ? allLines
+              .whereType<Map>()
+              .map((m) => Map<String, dynamic>.from(m))
+              .where((m) => m['_id']?.toString() != e['_id']?.toString())
+              .toList()
+          : <Map<String, dynamic>>[];
 
       String clinicIdStr = '';
       String clinicName = '';

@@ -19,7 +19,8 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
   Clinic? _clinic;
   List<Clinic> _allClinics = [];
   bool _fetchingClinics = false;
-  String? _selectedServiceName;
+  String? _selectedServiceName; // selected services joined with ", " (display)
+  final List<String> _selectedServices = []; // multi-select
 
   DateTime?    _selectedDate;
   String?      _selectedTime;
@@ -178,6 +179,7 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
       final res = await ApiService.bookAppointment({
         'clinicId':        _clinic!.id,
         'serviceName':     _selectedServiceName,
+        'serviceNames':    List<String>.from(_selectedServices),
         'appointmentDate': dateStr,
         'timeSlot':        _selectedTime,
         'patientType':     _patientType.label,
@@ -305,7 +307,14 @@ class _BookAppointmentScreenState extends State<BookAppointmentScreen> {
             : _clinic == null
             ? _ClinicSelectionList(clinics: _allClinics, onSelect: (c) => setState(() => _clinic = c))
             : _step == 1
-            ? _StepService(services: _serviceNames, selected: _selectedServiceName, onSelect: (s) => setState(() => _selectedServiceName = s))
+            ? _StepService(services: _serviceNames, selected: _selectedServices, onSelect: (s) => setState(() {
+                if (_selectedServices.contains(s)) {
+                  _selectedServices.remove(s);
+                } else {
+                  _selectedServices.add(s);
+                }
+                _selectedServiceName = _selectedServices.isEmpty ? null : _selectedServices.join(', ');
+              }))
             : _step == 2
             ? _StepSchedule(
                 selectedDate:   _selectedDate,
@@ -390,7 +399,7 @@ class _ClinicSelectionList extends StatelessWidget {
 // ── Step 1: Service ───────────────────────────────────────────────────────────
 class _StepService extends StatelessWidget {
   final List<String>          services;
-  final String?               selected;
+  final List<String>          selected; // multi-select
   final void Function(String) onSelect;
   const _StepService({required this.services, required this.selected, required this.onSelect});
 
@@ -406,7 +415,7 @@ class _StepService extends StatelessWidget {
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (_, i) {
         final svc = services[i];
-        final sel = selected == svc;
+        final sel = selected.contains(svc);
         return GestureDetector(
           onTap: () => onSelect(svc),
           child: AnimatedContainer(

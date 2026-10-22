@@ -698,6 +698,76 @@ class _QueueMonitoringScreenState extends State<QueueMonitoringScreen>
                                   _statCol(
                                       'Service', entry?['serviceName'] ?? '—'),
                                 ]),
+                            // Multi-service visit: the patient's other lines,
+                            // each with its own ticket; a line is paused while
+                            // the patient is being called/served elsewhere.
+                            Builder(builder: (ctx) {
+                              final others =
+                                  ctx.watch<AppState>().otherQueueLines;
+                              if (others.isEmpty) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Your other lines (same ticket number)',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700)),
+                                    const SizedBox(height: 6),
+                                    ...others.map((o) {
+                                      final hold = o['onHold'] == true;
+                                      final status =
+                                          o['status']?.toString() ?? '';
+                                      final sub = hold
+                                          ? 'On hold — ${o['holdReason'] ?? ''}'
+                                          : status == 'called'
+                                              ? 'Called — please proceed'
+                                              : 'Position ${o['position'] ?? '-'}';
+                                      return Container(
+                                        margin: const EdgeInsets.only(bottom: 6),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 9),
+                                        decoration: BoxDecoration(
+                                          color: hold
+                                              ? const Color(0xFFFEF3C7)
+                                              : const Color(0xFFF3F4F6),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                      o['serviceName']
+                                                              ?.toString() ??
+                                                          '',
+                                                      style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          fontSize: 13)),
+                                                  Text(sub,
+                                                      style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color:
+                                                              Colors.black54)),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              );
+                            }),
                             const SizedBox(height: 16),
                             const Divider(),
                             const SizedBox(height: 16),
